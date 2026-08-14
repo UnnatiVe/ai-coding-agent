@@ -6,8 +6,8 @@ export async function getJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-export interface HealthResponse {
+export interface ReadyResponse {
   status: string;
-  service: string;
-  uptime: number;
+  redis: boolean;
+  postgres: boolean;
 }

@@ -1,33 +1,48 @@
 import { z } from "zod";
 
-/** Lifecycle of a single agent run. */
-export const runStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "cancelled"]);
-export type RunStatus = z.infer<typeof runStatusSchema>;
+/** Anything that survives a round trip through a Postgres `Json` column. */
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 
-/** Payload accepted by `POST /api/runs`. */
-export const createRunRequestSchema = z.object({
-  repoFullName: z.string().regex(/^[\w.-]+\/[\w.-]+$/, "expected owner/repo"),
-  task: z.string().min(10).max(4000),
+export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValueSchema),
+    z.record(jsonValueSchema),
+  ]),
+);
+
+/** Lifecycle of a task, mirrors the `TaskStatus` enum in the Prisma schema. */
+export const taskStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "cancelled"]);
+export type TaskStatus = z.infer<typeof taskStatusSchema>;
+
+/** Lifecycle of a single agent attempt, mirrors Prisma's `AgentRunStatus`. */
+export const agentRunStatusSchema = z.enum(["running", "succeeded", "failed", "aborted"]);
+export type AgentRunStatus = z.infer<typeof agentRunStatusSchema>;
+
+export const repoFullNameSchema = z.string().regex(/^[\w.-]+\/[\w.-]+$/, "expected owner/repo");
+
+/** Payload accepted by `POST /api/tasks`. */
+export const createTaskRequestSchema = z.object({
+  repoFullName: repoFullNameSchema,
+  prompt: z.string().min(10).max(4000),
   baseBranch: z.string().min(1).max(255).default("main"),
 });
-export type CreateRunRequest = z.infer<typeof createRunRequestSchema>;
+export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
 
-export interface RunSummary {
+export interface TaskSummary {
   id: string;
   repoFullName: string;
-  task: string;
+  prompt: string;
   baseBranch: string;
-  status: RunStatus;
+  status: TaskStatus;
+  branchName: string | null;
+  prUrl: string | null;
+  error: string | null;
   createdAt: string;
   updatedAt: string;
-}
-
-/** Name of the BullMQ queue shared by the API (producer) and worker (consumer). */
-export const RUN_QUEUE = "agent-runs";
-
-/** Redis pub/sub channel carrying `RunEvent`s for a given run. */
-export const runChannel = (runId: string): string => `run:${runId}`;
-
-export interface RunJobData {
-  runId: string;
+  startedAt: string | null;
+  finishedAt: string | null;
 }

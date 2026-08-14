@@ -10,8 +10,10 @@
   },
   "scripts": {
     "generate": "prisma generate",
-    "push": "dotenv -e ../../.env -- prisma db push",
     "migrate": "dotenv -e ../../.env -- prisma migrate dev",
+    "deploy": "dotenv -e ../../.env -- prisma migrate deploy",
+    "reset": "dotenv -e ../../.env -- prisma migrate reset",
+    "push": "dotenv -e ../../.env -- prisma db push",
     "studio": "dotenv -e ../../.env -- prisma studio",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"

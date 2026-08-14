@@ -4,8 +4,9 @@ import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 import { corsOrigins } from "./env.js";
 import { logger } from "./logger.js";
+import { errorHandler } from "./middleware/errorHandler.js";
 import { healthRouter } from "./routes/health.js";
-import { runsRouter } from "./routes/runs.js";
+import { tasksRouter } from "./routes/tasks.js";
 
 export function createApp(): Express {
   const app = express();
@@ -16,9 +17,10 @@ export function createApp(): Express {
   app.use(pinoHttp({ logger }));
 
   app.use("/api", healthRouter);
-  app.use("/api", runsRouter);
+  app.use("/api", tasksRouter);
 
   app.use((_req, res) => res.status(404).json({ error: "not_found" }));
+  app.use(errorHandler);
 
   return app;
 }

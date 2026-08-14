@@ -1,5 +1,6 @@
-// Phase 1: minimal schema so the API can persist runs. Steps, tool calls and
-// GitHub installations arrive in Phase 2 alongside the agent loop.
+// Phase 2: persistence for users, repositories, tasks and agent telemetry.
+// The LLM/agent loop is not implemented yet; AgentRun and ToolCall exist so the
+// worker has somewhere to record attempts and tool usage from Phase 7 onwards.
 
 generator client {
   provider = "prisma-client-js"
@@ -11,7 +12,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum RunStatus {
+enum TaskStatus {
   queued
   running
   succeeded
@@ -19,35 +20,140 @@ enum RunStatus {
   cancelled
 }
 
-model Run {
-  id           String    @id @default(cuid())
-  repoFullName String
-  task         String
-  baseBranch   String    @default("main")
-  status       RunStatus @default(queued)
+enum AgentRunStatus {
+  running
+  succeeded
+  failed
+  aborted
+}
+
+/// A person who submits tasks. Populated by a dev placeholder until GitHub
+/// OAuth lands in Phase 5, hence every identity field except `login` is optional.
+model User {
+  id        String   @id @default(cuid())
+  githubId  String?  @unique
+  login     String   @unique
+  name      String?
+  email     String?
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  repositories Repository[]
+  tasks        Task[]
+}
+
+/// A GitHub repository the agent may work on. Cached locally so tasks keep a
+/// stable reference (and history) even if the installation is later removed.
+model Repository {
+  id             String   @id @default(cuid())
+  githubId       String?  @unique
+  owner          String
+  name           String
+  fullName       String   @unique
+  defaultBranch  String   @default("main")
+  private        Boolean  @default(false)
+  /// GitHub App installation that grants access. Set in Phase 5.
+  installationId String?
+  addedById      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  addedBy User?  @relation(fields: [addedById], references: [id], onDelete: SetNull)
+  tasks   Task[]
+
+  @@index([owner, name])
+}
+
+/// One user request ("fix the failing date parser"). The unit the UI polls and
+/// streams; owns the queue job and every attempt made to satisfy it.
+model Task {
+  id           String     @id @default(cuid())
+  userId       String
+  repositoryId String
+  prompt       String
+  baseBranch   String     @default("main")
+  status       TaskStatus @default(queued)
+  /// Branch the agent works on, e.g. `agent/<taskId>`.
+  branchName   String?
+  prUrl        String?
   error        String?
+  /// BullMQ job id, so a task can be inspected or cancelled in the queue.
+  jobId        String?
   startedAt    DateTime?
   finishedAt   DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
-  events RunEvent[]
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository  @relation(fields: [repositoryId], references: [id], onDelete: Restrict)
+  events     TaskEvent[]
+  runs       AgentRun[]
 
+  @@index([userId, createdAt])
   @@index([status, createdAt])
 }
 
-/// Append-only event log; also what the API replays when a browser reconnects
-/// to an in-flight SSE stream.
-model RunEvent {
+/// Append-only progress log. Written before an event is published to Redis, so
+/// a browser that reconnects mid-task can replay everything it missed (Phase 3).
+model TaskEvent {
   id      String   @id @default(cuid())
-  runId   String
+  taskId  String
+  /// Per-task monotonic sequence number; the client's resume cursor.
   seq     Int
   type    String
   payload Json
   at      DateTime @default(now())
 
-  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
-  @@unique([runId, seq])
-  @@index([runId, seq])
+  @@unique([taskId, seq])
+  @@index([taskId, seq])
+}
+
+/// One attempt by the agent at a task. Separate from Task because a task may be
+/// retried, and each attempt has its own model, token spend and cost.
+model AgentRun {
+  id               String         @id @default(cuid())
+  taskId           String
+  /// 1-based attempt number within the task.
+  attempt          Int            @default(1)
+  status           AgentRunStatus @default(running)
+  model            String?
+  inputTokens      Int            @default(0)
+  outputTokens     Int            @default(0)
+  costUsd          Decimal        @default(0) @db.Decimal(10, 6)
+  stepCount        Int            @default(0)
+  error            String?
+  startedAt        DateTime       @default(now())
+  finishedAt       DateTime?
+
+  task      Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  toolCalls ToolCall[]
+
+  @@unique([taskId, attempt])
+  @@index([taskId])
+}
+
+/// Every tool invocation the model made, with arguments and outcome. This is the
+/// audit trail: it is what makes a run replayable and reviewable after the fact.
+model ToolCall {
+  id         String    @id @default(cuid())
+  agentRunId String
+  /// Position within the agent loop for this run.
+  stepIndex  Int
+  name       String
+  args       Json
+  /// Truncated observation returned to the model.
+  result     String?
+  ok         Boolean   @default(false)
+  error      String?
+  durationMs Int?
+  createdAt  DateTime  @default(now())
+
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  @@unique([agentRunId, stepIndex])
+  @@index([agentRunId])
+  @@index([name])
 }
