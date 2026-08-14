@@ -26,3 +26,6 @@ workspaces/
 
 # prisma generated client
 packages/db/src/generated/
+
+# TS incremental build info
+*.tsbuildinfo
