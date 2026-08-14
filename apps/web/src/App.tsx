@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { TaskSummary } from "@aca/shared";
-import { getJson, type ReadyResponse } from "./lib/api.js";
+import { getJson, getReady, type ReadyResponse } from "./lib/api.js";
 
 /**
  * Phase 2 shell: proves browser -> Vite proxy -> Express -> Postgres/Redis.
@@ -12,15 +12,13 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      getJson<ReadyResponse>("/api/health/ready"),
-      getJson<{ tasks: TaskSummary[] }>("/api/tasks"),
-    ])
-      .then(([health, list]) => {
-        setReady(health);
-        setTasks(list.tasks);
-      })
+    // Independent requests: a degraded dependency must not blank out the task list.
+    getReady()
+      .then(setReady)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+    getJson<{ tasks: TaskSummary[] }>("/api/tasks")
+      .then((list) => setTasks(list.tasks))
+      .catch(() => setTasks([]));
   }, []);
 
   return (
@@ -32,7 +30,7 @@ export function App() {
         <div className="status">
           {ready ? (
             <>
-              API: <span className="ok">ok</span> · Postgres:{" "}
+              API: <span className="ok">{ready.status}</span> · Postgres:{" "}
               <span className={ready.postgres ? "ok" : "bad"}>{String(ready.postgres)}</span> ·
               Redis: <span className={ready.redis ? "ok" : "bad"}>{String(ready.redis)}</span>
             </>
