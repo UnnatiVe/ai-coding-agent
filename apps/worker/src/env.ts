@@ -1,7 +1,9 @@
 import { config } from "dotenv";
 import { z } from "zod";
+import { fileURLToPath } from "url";
 
-config({ path: new URL("../../../.env", import.meta.url).pathname });
+// Use fileURLToPath so the path is correct on Windows (avoids a leading '/').
+config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
