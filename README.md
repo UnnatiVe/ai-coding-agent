@@ -4,10 +4,10 @@ A learning project: an AI agent that takes a software-engineering task, reads a 
 repository, edits code through controlled tools, runs tests in an isolated sandbox, and
 iterates until the task is done — streaming its progress to a web UI.
 
-> **Status: Phase 2 — database + queue infrastructure.** Real Prisma schema and
-> migrations, BullMQ producer/consumer, durable task events. A submitted task travels
-> API → Postgres → Redis → worker and ends in `failed` on purpose: the LLM, the agent
-> loop, the tool registry and the Docker sandbox are not implemented yet.
+> **Status: Phase 3 — live streaming.** Worker progress travels over Redis pub/sub and
+> SSE into a live timeline in the browser, with replay and reconnection. The task
+> pipeline still ends in `failed` on purpose: the LLM, the agent loop, the tool registry
+> and the Docker sandbox are not implemented yet.
 
 ## Requirements
 
@@ -26,7 +26,7 @@ pnpm db:migrate      # apply migrations to the dev database
 pnpm dev             # api :3001, web :5173, worker (queue consumer)
 ```
 
-Then open http://localhost:5173 — the page reports Postgres/Redis health and lists tasks.
+Then open http://localhost:5173 — submit a task and watch its timeline stream in live.
 
 ### Database migrations
 
@@ -53,6 +53,8 @@ curl -X POST localhost:3001/api/tasks -H 'content-type: application/json' \
   -d '{"repoFullName":"owner/repo","prompt":"Add a health check endpoint"}'
 curl localhost:3001/api/tasks/<id>         # queued -> running -> failed (no agent yet)
 curl localhost:3001/api/tasks/<id>/events  # durable event log, ?after=<seq> to resume
+curl -N localhost:3001/api/tasks/<id>/stream            # live SSE timeline
+curl -N -H 'Last-Event-ID: 4' .../stream                # resume after seq 4
 
 pnpm lint && pnpm typecheck && pnpm build
 ```
@@ -67,6 +69,26 @@ pnpm lint && pnpm typecheck && pnpm build
 | `TaskEvent`  | Append-only progress log with a per-task `seq`. Written **before** publishing to Redis, so a reconnecting browser can replay from `?after=<seq>`. |
 | `AgentRun`   | One attempt at a task. Separating it from `Task` makes retries, model choice and token/cost accounting natural.                                   |
 | `ToolCall`   | Audit trail of every tool the agent invokes (args, result, duration) — needed for debugging and for the Phase 11 security review.                 |
+
+## Streaming
+
+Progress reaches the browser over Redis pub/sub and Server-Sent Events:
+
+- The worker persists each `TaskEvent` and then `PUBLISH`es it to `task:<taskId>`.
+- The API holds **one** Redis subscriber connection for the whole process
+  (`apps/api/src/events/hub.ts`) and fans each channel out to the SSE responses watching
+  that task — one Redis `SUBSCRIBE` per task, not per browser tab.
+- `GET /api/tasks/:id/stream` subscribes _first_, then replays persisted events from the
+  resume point, buffering anything that arrives in between; every write is filtered by
+  `seq`, so no gap and no duplicate.
+- The resume point is the `Last-Event-ID` header (EventSource sends it automatically on
+  reconnect) or `?after=<seq>`. A `: ping` comment every 15s keeps proxies from closing
+  an idle stream, and a terminal status ends the stream with `event: done` so the browser
+  stops reconnecting to a finished task.
+
+SSE rather than WebSockets: this traffic is one-way, EventSource gives reconnection and
+event ids for free, and it is plain HTTP — no second protocol to proxy, authenticate or
+scale.
 
 ## Queue
 
@@ -85,7 +107,7 @@ One BullMQ queue, `agent-tasks`, backed by Redis:
 ai-coding-agent/
 ├─ apps/
 │  ├─ web/       React + Vite frontend (task UI, run timeline, log stream)
-│  ├─ api/       Express REST API + SSE hub; enqueues runs, never runs them
+│  ├─ api/       Express REST API + SSE hub; enqueues tasks, never runs them
 │  └─ worker/    BullMQ consumer; will host the agent loop and sandbox
 ├─ packages/
 │  ├─ shared/    Zod schemas + types shared by all three apps (events, contracts)
@@ -113,7 +135,7 @@ browser (web:5173)
    ▼
 api (:3001) ──enqueue task.run──► Redis / BullMQ ──job──► worker
    │                                 ▲                      │
-   └── SSE (Phase 3) ◄───────────────┴── task:<id> pub/sub ──┤
+   └── SSE /stream ◄────────────────┴── task:<id> pub/sub ──┤
    │                                                         │
    └──► Postgres (User, Repository, Task, TaskEvent,  ◄──────┘
         AgentRun, ToolCall)
@@ -149,7 +171,7 @@ exposed to the browser. `.env` is git-ignored; never commit real credentials.
 | ----- | --------------------------------------------------------------------- |
 | 1     | Monorepo scaffold, TS/lint config, Postgres + Redis, health checks ✅ |
 | 2     | Data model + queue wiring: `POST /api/tasks` → job → worker ✅        |
-| 3     | Event streaming end to end (Redis pub/sub → SSE → live timeline)      |
+| 3     | Event streaming end to end (Redis pub/sub → SSE → live timeline) ✅   |
 | 4     | Docker sandbox: per-run container, resource limits, filesystem jail   |
 | 5     | GitHub App: OAuth, installation tokens, clone, branch management      |
 | 6     | Tool registry (read-only tools) with zod-validated arguments          |

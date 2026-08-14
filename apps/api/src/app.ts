@@ -6,6 +6,7 @@ import { corsOrigins } from "./env.js";
 import { logger } from "./logger.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { healthRouter } from "./routes/health.js";
+import { streamRouter } from "./routes/stream.js";
 import { tasksRouter } from "./routes/tasks.js";
 
 export function createApp(): Express {
@@ -18,6 +19,7 @@ export function createApp(): Express {
 
   app.use("/api", healthRouter);
   app.use("/api", tasksRouter);
+  app.use("/api", streamRouter);
 
   app.use((_req, res) => res.status(404).json({ error: "not_found" }));
   app.use(errorHandler);
