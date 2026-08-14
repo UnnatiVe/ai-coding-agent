@@ -1,0 +1,53 @@
+// Phase 1: minimal schema so the API can persist runs. Steps, tool calls and
+// GitHub installations arrive in Phase 2 alongside the agent loop.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RunStatus {
+  queued
+  running
+  succeeded
+  failed
+  cancelled
+}
+
+model Run {
+  id           String    @id @default(cuid())
+  repoFullName String
+  task         String
+  baseBranch   String    @default("main")
+  status       RunStatus @default(queued)
+  error        String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  events RunEvent[]
+
+  @@index([status, createdAt])
+}
+
+/// Append-only event log; also what the API replays when a browser reconnects
+/// to an in-flight SSE stream.
+model RunEvent {
+  id      String   @id @default(cuid())
+  runId   String
+  seq     Int
+  type    String
+  payload Json
+  at      DateTime @default(now())
+
+  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, seq])
+  @@index([runId, seq])
+}

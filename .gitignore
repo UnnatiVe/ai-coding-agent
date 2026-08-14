@@ -1,0 +1,28 @@
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+
+# env
+.env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# runtime workspaces used by the agent sandbox (later phases)
+/var-agent/
+workspaces/
+
+# editors / os
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# prisma generated client
+packages/db/src/generated/
