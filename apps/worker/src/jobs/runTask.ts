@@ -4,6 +4,15 @@ import type { Redis } from "ioredis";
 import { emitTaskEvent } from "../events.js";
 import { logger } from "../logger.js";
 
+const STEP_DELAY_MS = 700;
+const PLACEHOLDER_STEPS = [
+  "resolving repository metadata",
+  "planning the change",
+  "reading candidate files",
+];
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Phase 2 skeleton of the real pipeline. It owns the task lifecycle
  * (queued -> running -> terminal) and records an `AgentRun` attempt, but the
@@ -30,6 +39,14 @@ export async function handleRunTask(publisher: Redis, raw: unknown, attempt: num
     update: { status: "running", error: null, finishedAt: null },
     create: { taskId, attempt, status: "running" },
   });
+
+  // Stand-in for the agent loop: a few spaced-out events so the streaming path
+  // (Redis pub/sub -> SSE -> timeline) is exercised by a real sequence.
+  for (const [stepIndex, note] of PLACEHOLDER_STEPS.entries()) {
+    await emitTaskEvent(publisher, taskId, { type: "step.start", stepIndex });
+    await emitTaskEvent(publisher, taskId, { type: "log", level: "info", message: note });
+    await delay(STEP_DELAY_MS);
+  }
 
   const message = "agent loop not implemented yet (Phase 7)";
   await emitTaskEvent(publisher, taskId, { type: "log", level: "warn", message });
