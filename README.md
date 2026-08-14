@@ -4,9 +4,10 @@ A learning project: an AI agent that takes a software-engineering task, reads a 
 repository, edits code through controlled tools, runs tests in an isolated sandbox, and
 iterates until the task is done — streaming its progress to a web UI.
 
-> **Status: Phase 1 — monorepo scaffold.** Infrastructure, typed contracts and a running
-> dev loop only. The LLM, the agent loop, the tool registry and the Docker sandbox are
-> not implemented yet.
+> **Status: Phase 2 — database + queue infrastructure.** Real Prisma schema and
+> migrations, BullMQ producer/consumer, durable task events. A submitted task travels
+> API → Postgres → Redis → worker and ends in `failed` on purpose: the LLM, the agent
+> loop, the tool registry and the Docker sandbox are not implemented yet.
 
 ## Requirements
 
@@ -21,19 +22,62 @@ cp .env.example .env
 pnpm install
 pnpm infra:up        # postgres + redis
 pnpm db:generate     # generate the Prisma client
-pnpm db:push         # create tables (dev only; migrations come later)
+pnpm db:migrate      # apply migrations to the dev database
 pnpm dev             # api :3001, web :5173, worker (queue consumer)
 ```
 
-Then open http://localhost:5173 — the page reports the API health status.
+Then open http://localhost:5173 — the page reports Postgres/Redis health and lists tasks.
 
-Useful checks:
+### Database migrations
+
+Prisma reads the root `.env` through `dotenv-cli`, so these work from anywhere in the repo:
+
+| Command            | When                                                               |
+| ------------------ | ------------------------------------------------------------------ |
+| `pnpm db:generate` | After changing `schema.prisma`, to regenerate the typed client     |
+| `pnpm db:migrate`  | Dev: create and apply a migration                                  |
+| `pnpm db:deploy`   | CI/production: apply committed migrations, never generate new ones |
+| `pnpm db:reset`    | Drop the dev database and replay every migration from scratch      |
+| `pnpm db:studio`   | Browse the data in Prisma Studio                                   |
+
+Migrations live in `packages/db/prisma/migrations` and are committed.
+
+### Verifying the queue
 
 ```bash
-curl localhost:3001/api/health         # { "status": "ok", ... }
-curl localhost:3001/api/health/ready   # deep check, includes Redis
+curl localhost:3001/api/health/ready       # {"status":"ready","redis":true,"postgres":true}
+curl -X POST localhost:3001/api/dev/ping   # smoke job; worker logs "ping job processed"
+pnpm queue:ping                            # same job, from the CLI
+
+curl -X POST localhost:3001/api/tasks -H 'content-type: application/json' \
+  -d '{"repoFullName":"owner/repo","prompt":"Add a health check endpoint"}'
+curl localhost:3001/api/tasks/<id>         # queued -> running -> failed (no agent yet)
+curl localhost:3001/api/tasks/<id>/events  # durable event log, ?after=<seq> to resume
+
 pnpm lint && pnpm typecheck && pnpm build
 ```
+
+## Data model
+
+| Model        | Why it exists                                                                                                                                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `User`       | Owns tasks. Carries `githubId`/`login` so the Phase 5 OAuth session slots in without a schema change.                                             |
+| `Repository` | Cached repo metadata (owner, default branch, GitHub App `installationId`) so a task references a row, not a raw string.                           |
+| `Task`       | One user request and its lifecycle (`queued → running → succeeded/failed/cancelled`), plus the BullMQ `jobId` and the resulting branch/PR.        |
+| `TaskEvent`  | Append-only progress log with a per-task `seq`. Written **before** publishing to Redis, so a reconnecting browser can replay from `?after=<seq>`. |
+| `AgentRun`   | One attempt at a task. Separating it from `Task` makes retries, model choice and token/cost accounting natural.                                   |
+| `ToolCall`   | Audit trail of every tool the agent invokes (args, result, duration) — needed for debugging and for the Phase 11 security review.                 |
+
+## Queue
+
+One BullMQ queue, `agent-tasks`, backed by Redis:
+
+- The API is a **producer** only. `POST /api/tasks` writes the `Task` row first, then adds
+  a `task.run` job with the deterministic id `task-<taskId>`, so a double submit is a no-op.
+- The worker is the **consumer**. It routes by job name (`task.run`, `test.ping`), runs
+  `WORKER_CONCURRENCY` jobs in parallel and retries with exponential backoff.
+- Progress is written to `TaskEvent` and published to the Redis channel `task:<taskId>`;
+  Phase 3 turns that channel into the SSE stream.
 
 ## Workspace layout
 
@@ -45,7 +89,7 @@ ai-coding-agent/
 │  └─ worker/    BullMQ consumer; will host the agent loop and sandbox
 ├─ packages/
 │  ├─ shared/    Zod schemas + types shared by all three apps (events, contracts)
-│  └─ db/        Prisma schema and the shared PrismaClient
+│  └─ db/        Prisma schema, migrations and the shared PrismaClient
 ├─ docker-compose.yml   Postgres 16 + Redis 7
 ├─ eslint.config.js     Flat ESLint config (TS + Prettier)
 └─ tsconfig.base.json   Strict TS options every package extends
@@ -56,35 +100,43 @@ ai-coding-agent/
 | Workspace         | Purpose                                                                                                                                                                                                                                 |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `apps/web`        | The only thing the user touches. Submits tasks, renders the run timeline, live logs and diffs. Talks to the API over REST and (from Phase 3) SSE. Vite proxies `/api` to the backend in dev.                                            |
-| `apps/api`        | Thin HTTP layer: validates requests, persists runs, pushes jobs onto the queue, and relays run events to browsers over SSE. Deliberately holds **no** agent logic — an HTTP request must never block on a multi-minute run.             |
+| `apps/api`        | Thin HTTP layer: validates requests, persists tasks, pushes jobs onto the queue, and relays task events to browsers over SSE. Deliberately holds **no** agent logic — an HTTP request must never block on a multi-minute run.           |
 | `apps/worker`     | Where the agent actually lives. A separate process (and later a separate container with Docker socket access) that consumes queue jobs, drives the LLM loop, executes tools inside the sandbox, and publishes progress events to Redis. |
-| `packages/shared` | One source of truth for cross-process contracts: the `RunEvent` union, request schemas, queue name, channel naming. Zod gives runtime validation and static types from a single definition.                                             |
+| `packages/shared` | One source of truth for cross-process contracts: the task-event union, request schemas, job payloads, queue and channel names. Zod gives runtime validation and static types from a single definition.                                  |
 | `packages/db`     | Prisma schema plus a singleton client, so API and worker read/write the same models without duplicating setup.                                                                                                                          |
 
-## Architecture (Phase 1 slice)
+## Architecture (Phase 2 slice)
 
 ```
 browser (web:5173)
    │ REST /api/*        (Vite dev proxy)
    ▼
-api (:3001) ──enqueue──► Redis / BullMQ ──job──► worker
-   │                        ▲                      │
-   └── SSE (Phase 3) ◄──────┴── run events ────────┘
-   │
-   └──► Postgres (runs, run events)  ◄── worker
+api (:3001) ──enqueue task.run──► Redis / BullMQ ──job──► worker
+   │                                 ▲                      │
+   └── SSE (Phase 3) ◄───────────────┴── task:<id> pub/sub ──┤
+   │                                                         │
+   └──► Postgres (User, Repository, Task, TaskEvent,  ◄──────┘
+        AgentRun, ToolCall)
 ```
+
+The eventual full flow: the API validates the request, persists a `Task` and enqueues
+`task.run`. The worker picks the job up, marks the task `running` and opens an `AgentRun`;
+from Phase 7 it drives the LLM loop, where each step records a `ToolCall`, executes it in
+the sandbox and emits a `TaskEvent` that the API relays to the browser. The run finishes
+by setting the terminal status, branch and PR URL.
 
 ## Scripts
 
-| Command                                                     | Description                                          |
-| ----------------------------------------------------------- | ---------------------------------------------------- |
-| `pnpm dev`                                                  | Runs web, api and worker in parallel with hot reload |
-| `pnpm build`                                                | Builds every workspace                               |
-| `pnpm typecheck`                                            | Type-checks every workspace                          |
-| `pnpm lint`                                                 | ESLint across the repo (zero warnings allowed)       |
-| `pnpm format`                                               | Prettier write                                       |
-| `pnpm infra:up` / `infra:down`                              | Start/stop Postgres and Redis                        |
-| `pnpm db:generate` / `db:push` / `--filter @aca/db migrate` | Prisma client, dev schema sync, migrations           |
+| Command                                         | Description                                          |
+| ----------------------------------------------- | ---------------------------------------------------- |
+| `pnpm dev`                                      | Runs web, api and worker in parallel with hot reload |
+| `pnpm build`                                    | Builds every workspace                               |
+| `pnpm typecheck`                                | Type-checks every workspace                          |
+| `pnpm lint`                                     | ESLint across the repo (zero warnings allowed)       |
+| `pnpm format`                                   | Prettier write                                       |
+| `pnpm infra:up` / `infra:down`                  | Start/stop Postgres and Redis                        |
+| `pnpm db:generate` / `db:migrate` / `db:deploy` | Prisma client and migrations                         |
+| `pnpm queue:ping`                               | Enqueue a smoke job for the worker                   |
 
 ## Environment
 
@@ -96,7 +148,7 @@ exposed to the browser. `.env` is git-ignored; never commit real credentials.
 | Phase | Content                                                               |
 | ----- | --------------------------------------------------------------------- |
 | 1     | Monorepo scaffold, TS/lint config, Postgres + Redis, health checks ✅ |
-| 2     | Data model + queue wiring: real `POST /api/runs` → job → worker       |
+| 2     | Data model + queue wiring: `POST /api/tasks` → job → worker ✅        |
 | 3     | Event streaming end to end (Redis pub/sub → SSE → live timeline)      |
 | 4     | Docker sandbox: per-run container, resource limits, filesystem jail   |
 | 5     | GitHub App: OAuth, installation tokens, clone, branch management      |

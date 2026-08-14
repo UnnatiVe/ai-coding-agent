@@ -16,7 +16,11 @@
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down",
     "db:generate": "pnpm --filter @aca/db run generate",
-    "db:push": "pnpm --filter @aca/db run push"
+    "db:migrate": "pnpm --filter @aca/db run migrate",
+    "db:deploy": "pnpm --filter @aca/db run deploy",
+    "db:reset": "pnpm --filter @aca/db run reset",
+    "db:studio": "pnpm --filter @aca/db run studio",
+    "queue:ping": "pnpm --filter @aca/api run queue:ping"
   },
   "devDependencies": {
     "@eslint/js": "^9.17.0",
