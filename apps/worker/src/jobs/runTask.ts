@@ -4,11 +4,11 @@ import type { Redis } from "ioredis";
 import { emitTaskEvent } from "../events.js";
 import { logger } from "../logger.js";
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
- * Phase 2 skeleton of the real pipeline. It owns the task lifecycle
- * (queued -> running -> terminal) and records an `AgentRun` attempt, but the
- * body that will clone the repo, start the sandbox and drive the LLM loop is
- * not implemented yet, so every task ends as `failed` with `not_implemented`.
+ * Phase 3 simulated pipeline: the task still has no LLM or sandbox, but it now
+ * proceeds through a deterministic lifecycle and emits progress events.
  */
 export async function handleRunTask(publisher: Redis, raw: unknown, attempt: number) {
   const { taskId } = runTaskJobSchema.parse(raw);
@@ -19,30 +19,76 @@ export async function handleRunTask(publisher: Redis, raw: unknown, attempt: num
     return;
   }
 
-  await prisma.task.update({
-    where: { id: taskId },
-    data: { status: "running", startedAt: task.startedAt ?? new Date() },
-  });
-  await emitTaskEvent(publisher, taskId, { type: "task.status", status: "running" });
+  try {
+    await prisma.task.update({
+      where: { id: taskId },
+      data: {
+        status: "running",
+        startedAt: task.startedAt ?? new Date(),
+      },
+    });
+    await emitTaskEvent(publisher, taskId, { type: "task.status", status: "running" });
+    await emitTaskEvent(publisher, taskId, {
+      type: "log",
+      level: "info",
+      message: "task accepted and started in the simulated workflow",
+    });
 
-  const agentRun = await prisma.agentRun.upsert({
-    where: { taskId_attempt: { taskId, attempt } },
-    update: { status: "running", error: null, finishedAt: null },
-    create: { taskId, attempt, status: "running" },
-  });
+    const agentRun = await prisma.agentRun.upsert({
+      where: { taskId_attempt: { taskId, attempt } },
+      update: { status: "running", error: null, finishedAt: null },
+      create: { taskId, attempt, status: "running" },
+    });
 
-  const message = "agent loop not implemented yet (Phase 7)";
-  await emitTaskEvent(publisher, taskId, { type: "log", level: "warn", message });
+    await wait(600);
+    await emitTaskEvent(publisher, taskId, {
+      type: "log",
+      level: "info",
+      message: "simulating repository review and validation steps",
+    });
 
-  await prisma.agentRun.update({
-    where: { id: agentRun.id },
-    data: { status: "failed", error: message, finishedAt: new Date() },
-  });
-  await prisma.task.update({
-    where: { id: taskId },
-    data: { status: "failed", error: message, finishedAt: new Date() },
-  });
-  await emitTaskEvent(publisher, taskId, { type: "task.status", status: "failed" });
+    await wait(600);
+    await emitTaskEvent(publisher, taskId, {
+      type: "log",
+      level: "info",
+      message: "simulated task completed successfully",
+    });
 
-  logger.info({ taskId, attempt }, "task processed (no-op pipeline)");
+    await prisma.agentRun.update({
+      where: { id: agentRun.id },
+      data: { status: "succeeded", finishedAt: new Date() },
+    });
+    await prisma.task.update({
+      where: { id: taskId },
+      data: {
+        status: "succeeded",
+        error: null,
+        finishedAt: new Date(),
+      },
+    });
+    await emitTaskEvent(publisher, taskId, { type: "task.status", status: "succeeded" });
+
+    logger.info({ taskId, attempt }, "task processed successfully (simulated pipeline)");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "task processing failed";
+
+    await prisma.agentRun.upsert({
+      where: { taskId_attempt: { taskId, attempt } },
+      update: { status: "failed", error: message, finishedAt: new Date() },
+      create: { taskId, attempt, status: "failed", error: message, finishedAt: new Date() },
+    });
+    await prisma.task.update({
+      where: { id: taskId },
+      data: { status: "failed", error: message, finishedAt: new Date() },
+    });
+    await emitTaskEvent(publisher, taskId, {
+      type: "log",
+      level: "error",
+      message,
+    });
+    await emitTaskEvent(publisher, taskId, { type: "task.status", status: "failed" });
+
+    logger.error({ taskId, attempt, err: error }, "task processing failed");
+    throw error;
+  }
 }
