@@ -1,17 +1,27 @@
 import { prisma } from "@aca/db";
 import type { TaskEventPayload } from "@aca/shared";
 import type { Redis } from "ioredis";
+import { env } from "../env.js";
 import { emitTaskEvent } from "../events.js";
 import { logger } from "../logger.js";
+import { OllamaAgentProvider } from "./providers/ollama.js";
 import { StubAgentProvider } from "./providers/stub.js";
 import { AgentRunner } from "./runner.js";
 import type { AgentProvider, AgentRunContext } from "./types.js";
+
+function createDefaultProvider(): AgentProvider {
+  if (env.AGENT_PROVIDER === "ollama") {
+    return new OllamaAgentProvider({ baseUrl: env.OLLAMA_BASE_URL, model: env.OLLAMA_MODEL });
+  }
+
+  return new StubAgentProvider();
+}
 
 export async function runAgentLoop(
   publisher: Redis,
   taskId: string,
   attempt: number,
-  provider: AgentProvider = new StubAgentProvider(),
+  provider: AgentProvider = createDefaultProvider(),
 ): Promise<void> {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
