@@ -1,4 +1,5 @@
 import type { TaskEventPayload } from "@aca/shared";
+import type { WorkspaceTools } from "../workspace/tools.js";
 import type { TaskWorkspace } from "../workspace/workspace.js";
 
 export type AgentStatus = "succeeded" | "failed";
@@ -10,6 +11,7 @@ export interface AgentRunContext {
   prompt: string;
   baseBranch: string;
   workspace: TaskWorkspace;
+  tools: WorkspaceTools;
   emit: (payload: TaskEventPayload) => Promise<void>;
 }
 

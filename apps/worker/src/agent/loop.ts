@@ -4,6 +4,7 @@ import type { Redis } from "ioredis";
 import { env } from "../env.js";
 import { emitTaskEvent } from "../events.js";
 import { logger } from "../logger.js";
+import { createWorkspaceTools } from "../workspace/tools.js";
 import { createTaskWorkspace } from "../workspace/workspace.js";
 import { OllamaAgentProvider } from "./providers/ollama.js";
 import { StubAgentProvider } from "./providers/stub.js";
@@ -39,6 +40,7 @@ export async function runAgentLoop(
 };
 
 const workspace = await createTaskWorkspace(taskId);
+const tools = createWorkspaceTools(workspace);
 
 const runContext: AgentRunContext = {
     taskId,
@@ -47,6 +49,7 @@ const runContext: AgentRunContext = {
     prompt: task.prompt,
     baseBranch: task.baseBranch,
     workspace,
+    tools,
     emit,
   };
 
