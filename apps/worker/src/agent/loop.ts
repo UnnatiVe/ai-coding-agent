@@ -4,6 +4,7 @@ import type { Redis } from "ioredis";
 import { env } from "../env.js";
 import { emitTaskEvent } from "../events.js";
 import { logger } from "../logger.js";
+import { createTaskWorkspace } from "../workspace/workspace.js";
 import { OllamaAgentProvider } from "./providers/ollama.js";
 import { StubAgentProvider } from "./providers/stub.js";
 import { AgentRunner } from "./runner.js";
@@ -34,15 +35,18 @@ export async function runAgentLoop(
   }
 
   const emit = async (payload: TaskEventPayload) => {
-    await emitTaskEvent(publisher, taskId, payload);
-  };
+  await emitTaskEvent(publisher, taskId, payload);
+};
 
-  const runContext: AgentRunContext = {
+const workspace = await createTaskWorkspace(taskId);
+
+const runContext: AgentRunContext = {
     taskId,
     attempt,
     repoFullName: task.repository.fullName,
     prompt: task.prompt,
     baseBranch: task.baseBranch,
+    workspace,
     emit,
   };
 

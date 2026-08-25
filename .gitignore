@@ -17,6 +17,7 @@ pnpm-debug.log*
 # runtime workspaces used by the agent sandbox (later phases)
 /var-agent/
 workspaces/
+.workspaces/
 
 # editors / os
 .DS_Store
