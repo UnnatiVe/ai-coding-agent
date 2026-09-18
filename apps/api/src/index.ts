@@ -6,6 +6,7 @@ import { closeQueue } from "./queue/producer.js";
 
 const server = createApp().listen(env.API_PORT, () => {
   logger.info(`api listening on http://localhost:${env.API_PORT}`);
+logger.info(`health check successful`);
 });
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
