@@ -5,7 +5,7 @@ import { pingRedis } from "../redis.js";
 export const healthRouter: Router = Router();
 
 healthRouter.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "api", uptime: process.uptime() });
+  res.json({ message: "Forge test successful" });
 });
 
 /** Deep check: reports dependency status without taking the process down. */
