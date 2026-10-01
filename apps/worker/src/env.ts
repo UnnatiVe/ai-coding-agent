@@ -17,3 +17,7 @@ const schema = z.object({
 });
 
 export const env = schema.parse(process.env);
+
+console.log(
+  `[config] AGENT_PROVIDER=${env.AGENT_PROVIDER} OLLAMA_BASE_URL=${env.OLLAMA_BASE_URL} OLLAMA_MODEL=${env.OLLAMA_MODEL}`,
+);

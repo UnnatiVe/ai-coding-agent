@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,10 +14,19 @@ export interface TaskWorkspace {
   rootPath: string;
 }
 
-export async function createTaskWorkspace(taskId: string): Promise<TaskWorkspace> {
+export async function createTaskWorkspace(
+  taskId: string,
+): Promise<TaskWorkspace> {
   const rootPath = path.join(WORKSPACE_ROOT, taskId);
 
-  await mkdir(rootPath, { recursive: true });
+  await rm(rootPath, {
+    recursive: true,
+    force: true,
+  });
+
+  await mkdir(rootPath, {
+    recursive: true,
+  });
 
   return {
     taskId,

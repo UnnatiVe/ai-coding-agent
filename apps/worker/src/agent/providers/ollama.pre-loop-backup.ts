@@ -149,24 +149,24 @@ export class OllamaAgentProvider implements AgentProvider {
     context: AgentRunContext,
     step: AgentStep,
   ): Promise<string> {
-    const MAX_TOOL_ROUNDS = 8;
-
     const messages: OllamaMessage[] = [
       {
         role: "system",
         content: [
-          "You are Forge, a local autonomous coding agent working in a controlled repository.",
-          "Inspect the actual repository before changing files. Never invent filenames, paths, APIs, or file contents.",
-          "Use listFiles to discover paths and readFile to inspect existing files.",
-          "For an existing file, use replaceInFile with exact text copied from readFile.",
-          "Use writeFile only to create a genuinely new file. Never overwrite an existing file.",
-          "Use getScripts before selecting a validation command. Do not install dependencies.",
-          "After editing, inspect the result and run relevant available validation commands.",
-          "If validation fails, inspect the reported error and repair the actual problem before validating again. Read the affected file when needed.",
-          "Do not run unrelated validation commands repeatedly while a known validation error remains. Fix the code first, then rerun the relevant validation command.",
-          "Once a relevant validation command succeeds, stop validating and finish the implementation. Do not run additional test, dev, lint, or build commands unless they are specifically needed to verify the requested change.",
-          "Only claim work that tools actually confirm.",
-          "If you cannot complete the task, explain what prevented completion.",
+          "You are Forge, a local autonomous coding agent.",
+          "You are currently implementing a coding task.",
+          "You are operating inside a controlled repository workspace.",
+          "",
+          "Available tools:",
+          "- listFiles(relativePath): list files and directories.",
+          "- readFile(relativePath): read a UTF-8 file.",
+          "- writeFile(relativePath, content): create or overwrite a UTF-8 file.",
+          "",
+          "Always use relative paths.",
+          "Never access paths outside the workspace.",
+          "Use the workspace tools to perform the actual requested changes.",
+          "Do not merely describe a change when you can perform it.",
+          "After successfully performing the requested change, briefly report what you did.",
         ].join("\n"),
       },
       {
@@ -175,186 +175,93 @@ export class OllamaAgentProvider implements AgentProvider {
           `Repository: ${context.repoFullName}`,
           `Base branch: ${context.baseBranch}`,
           `Task: ${context.prompt}`,
+          `Step: ${step.name}`,
           `Objective: ${step.description}`,
           "",
-          "Begin by listing the repository root and inspecting the relevant existing files.",
-          "Then implement the requested change using the available tools.",
+          "Implement the requested task now.",
         ].join("\n"),
       },
     ];
 
-    let successfulToolCalls = 0;
-    let consecutiveFailedToolCalls = 0;
-    const toolSummaries: string[] = [];
+    const response = await this.chat(messages, true);
 
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-      const response = await this.chat(messages, true);
+    if (!response.message) {
+      throw new Error("Ollama returned no message");
+    }
 
-      if (!response.message) {
-        throw new Error("Ollama returned no message");
-      }
+    const assistantMessage = response.message;
 
-      const assistantMessage = response.message;
+    let toolCalls = assistantMessage.tool_calls ?? [];
 
+    if (toolCalls.length === 0 && assistantMessage.content?.trim()) {
+      try {
+        const parsed = JSON.parse(assistantMessage.content);
 
-      let toolCalls = assistantMessage.tool_calls ?? [];
-
-      if (toolCalls.length === 0 && assistantMessage.content?.trim()) {
-        const rawContent = assistantMessage.content.trim();
-
-        try {
-          const cleanedContent = rawContent
-            .replace(/```(?:json)?/gi, "")
-            .replace(/```/g, "")
-            .trim();
-
-          const parsedToolCalls: typeof toolCalls = [];
-          const jsonObjects = cleanedContent.match(/\{[\s\S]*?\}(?=\s*\{|\s*$)/g) ?? [];
-
-          for (const jsonObject of jsonObjects) {
-            try {
-              const parsed = JSON.parse(jsonObject);
-
-              if (
-                parsed &&
-                typeof parsed === "object" &&
-                typeof parsed.name === "string" &&
-                parsed.arguments &&
-                typeof parsed.arguments === "object"
-              ) {
-                parsedToolCalls.push({
-                  function: {
-                    name: parsed.name,
-                    arguments: normalizeToolArguments(
-                      parsed.arguments as Record<string, unknown>,
-                    ),
-                  },
-                });
-              }
-            } catch {
-              // Ignore malformed JSON fragments and continue parsing.
-            }
-          }
-
-          if (parsedToolCalls.length > 0) {
-            toolCalls = parsedToolCalls;
-          }
-        } catch {
-          // The response was normal text rather than a JSON tool call.
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          typeof parsed.name === "string" &&
+          parsed.arguments &&
+          typeof parsed.arguments === "object"
+        ) {
+          toolCalls = [
+            {
+              function: {
+                name: parsed.name,
+                arguments: normalizeToolArguments(parsed.arguments),
+              },
+            },
+          ];
         }
-      }
-
-      if (toolCalls.length === 0) {
-        const content = assistantMessage.content?.trim();
-
-        if (successfulToolCalls === 0) {
-          throw new Error(
-            `Agent made no workspace tool calls. Response: ${content || "(empty response)"}`,
-          );
-        }
-
-        return [
-          content || "Implementation tool loop finished.",
-          "Workspace tool calls:",
-          ...toolSummaries,
-        ].join("\n");
-      }
-
-      messages.push({
-        role: "assistant",
-        content: assistantMessage.content ?? "",
-        tool_calls: toolCalls,
-      });
-
-      for (const toolCall of toolCalls) {
-        const name = toolCall.function.name;
-        const allowedNames = [
-          "listFiles",
-          "readFile",
-          "writeFile",
-          "replaceInFile",
-          "getScripts",
-          "runCommand",
-        ];
-
-        if (!allowedNames.includes(name)) {
-          consecutiveFailedToolCalls += 1;
-
-          const errorMessage = `Unsupported workspace tool: ${name}`;
-          messages.push({
-            role: "user",
-            content: `${errorMessage}. Use only the advertised workspace tools.`,
-          });
-
-          if (consecutiveFailedToolCalls >= 3) {
-            throw new Error(errorMessage);
-          }
-
-          continue;
-        }
-
-        const call: WorkspaceToolCall = {
-          name: name as WorkspaceToolCall["name"],
-          arguments: normalizeToolArguments(
-            toolCall.function.arguments ?? {},
-          ),
-        };
-
-        const result = await executeWorkspaceTool(context.tools, call);
-        if (!result.ok) {
-          consecutiveFailedToolCalls += 1;
-          const errorMessage = result.error ?? "Unknown tool error";
-
-          messages.push({
-            role: "user",
-            content: [
-              `Tool ${name} failed: ${errorMessage}`,
-              "Do not claim this operation succeeded.",
-              name === "replaceInFile"
-                ? "Read the existing file again and copy the exact unique text before retrying."
-                : name === "writeFile"
-                  ? "If the target exists, use replaceInFile instead."
-                  : "Correct the arguments or choose an appropriate tool.",
-            ].join("\n"),
-          });
-
-          if (consecutiveFailedToolCalls >= 3) {
-            throw new Error(
-              `Agent stopped after repeated tool failures. Last error: ${errorMessage}`,
-            );
-          }
-
-          continue;
-        }
-
-       consecutiveFailedToolCalls = 0;
-successfulToolCalls += 1;
-
-toolSummaries.push(`${name}: succeeded`);
-
-messages.push({
-  role: "tool",
-  content: JSON.stringify(result),
-});
-
-if (
-  name === "runCommand" &&
-  typeof call.arguments.command === "string" &&
-  /(?:typecheck|test|lint|build)/i.test(call.arguments.command)
-) {
-  return [
-    "Implementation and validation completed successfully.",
-    "Workspace tool calls:",
-    ...toolSummaries,
-  ].join("\n");
-}
+      } catch {
+        // Normal text response.
       }
     }
 
-    throw new Error(
-      `Agent reached the ${MAX_TOOL_ROUNDS}-round limit before finishing implementation.`,
-    );
+    if (toolCalls.length === 0) {
+      return (
+        assistantMessage.content?.trim() ||
+        `completed ${step.name} for ${context.taskId}`
+      );
+    }
+
+    const results: string[] = [];
+
+    for (const toolCall of toolCalls) {
+      const name = toolCall.function.name;
+
+      if (
+        name !== "listFiles" &&
+        name !== "readFile" &&
+        name !== "writeFile"
+      ) {
+        throw new Error(`Unsupported workspace tool: ${name}`);
+      }
+
+      const call: WorkspaceToolCall = {
+        name,
+        arguments: toolCall.function.arguments,
+      };
+
+      const toolResult = await executeWorkspaceTool(
+        context.tools,
+        call,
+      );
+
+      results.push(
+        `${name}: ${JSON.stringify(toolResult)}`,
+      );
+
+      if (!toolResult.ok) {
+        throw new Error(
+          `${name} failed: ${toolResult.error ?? "unknown error"}`,
+        );
+      }
+    }
+
+    return results.join("\n");
   }
+
   private async chat(
     messages: OllamaMessage[],
     enableTools: boolean,
@@ -504,3 +411,4 @@ function normalizeToolArguments(
 
   return normalized;
 }
+

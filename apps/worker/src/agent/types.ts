@@ -1,7 +1,7 @@
 import type { TaskEventPayload } from "@aca/shared";
 import type { WorkspaceTools } from "../workspace/tools.js";
 import type { TaskWorkspace } from "../workspace/workspace.js";
-
+import type { GitService } from "../git/service.js";
 export type AgentStatus = "succeeded" | "failed";
 
 export interface AgentRunContext {
@@ -12,6 +12,7 @@ export interface AgentRunContext {
   baseBranch: string;
   workspace: TaskWorkspace;
   tools: WorkspaceTools;
+  git: GitService;
   emit: (payload: TaskEventPayload) => Promise<void>;
 }
 
