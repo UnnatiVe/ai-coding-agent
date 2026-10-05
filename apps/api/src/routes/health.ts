@@ -6,6 +6,7 @@ export const healthRouter: Router = Router();
 
 healthRouter.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "api", uptime: process.uptime() });
+  // Endpoint returns the API service status.
 });
 
 /** Deep check: reports dependency status without taking the process down. */
