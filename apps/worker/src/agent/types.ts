@@ -37,5 +37,12 @@ export interface AgentRunResult {
 
 export interface AgentProvider {
   plan(context: AgentRunContext): AgentStep[];
-  executeStep(context: AgentRunContext, step: AgentStep): Promise<AgentStepResult>;
+  executeStep(
+    context: AgentRunContext,
+    step: AgentStep,
+  ): Promise<AgentStepResult>;
+  repair(
+    context: AgentRunContext,
+    feedback: string,
+  ): Promise<AgentStepResult>;
 }

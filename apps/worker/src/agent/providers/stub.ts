@@ -9,7 +9,7 @@ export class StubAgentProvider implements AgentProvider {
     ];
   }
 
-  async executeStep(context: AgentRunContext, step: AgentStep): Promise<AgentStepResult> {
+   async executeStep(context: AgentRunContext, step: AgentStep): Promise<AgentStepResult> {
     const summaryByStep: Record<string, string> = {
       plan: `planned a deterministic workflow for ${context.repoFullName} on ${context.baseBranch}`,
       review: `reviewed task requirements for "${context.prompt.slice(0, 96)}${context.prompt.length > 96 ? "…" : ""}"`,
@@ -22,6 +22,18 @@ export class StubAgentProvider implements AgentProvider {
       stepIndex: step.index,
       name: step.name,
       summary,
+      ok: true,
+    };
+  }
+
+  async repair(
+    _context: AgentRunContext,
+    _feedback: string,
+  ): Promise<AgentStepResult> {
+    return {
+      stepIndex: 0,
+      name: "repair",
+      summary: "Stub repair completed.",
       ok: true,
     };
   }

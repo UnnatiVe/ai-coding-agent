@@ -14,6 +14,7 @@ import { executeCommand } from "../workspace/command-executor.js";
 import { OllamaAgentProvider } from "./providers/ollama.js";
 import { StubAgentProvider } from "./providers/stub.js";
 import { AgentRunner } from "./runner.js";
+import { verifyTaskResult } from "./verifier.js";
 
 import type {
   AgentProvider,
@@ -231,7 +232,60 @@ export async function runAgentLoop(
     const result = await runner.run(runContext);
 
     // Commit, push and create PR if the agent succeeded.
-    if (result.status === "succeeded") {
+   if (result.status === "succeeded") {
+  let verification = await verifyTaskResult(runContext);
+  let repairAttempts = 0;
+  const maxRepairAttempts = 2;
+
+  await emit({
+    type: "log",
+    level: verification.ok ? "info" : "error",
+    message: verification.summary,
+  });
+
+  while (!verification.ok && repairAttempts < maxRepairAttempts) {
+    repairAttempts += 1;
+
+    await emit({
+      type: "log",
+      level: "info",
+      message:
+        `Deterministic verification failed. Starting repair attempt ` +
+        `${repairAttempts}/${maxRepairAttempts}.`,
+    });
+
+    const repairResult = await provider.repair(
+      runContext,
+      verification.summary,
+    );
+
+    await emit({
+      type: "log",
+      level: repairResult.ok ? "info" : "error",
+      message: repairResult.ok
+        ? `Repair attempt ${repairAttempts} completed: ${repairResult.summary}`
+        : `Repair attempt ${repairAttempts} failed: ${repairResult.summary}`,
+    });
+
+    if (!repairResult.ok) {
+      throw new Error(repairResult.summary);
+    }
+
+    verification = await verifyTaskResult(runContext);
+
+    await emit({
+      type: "log",
+      level: verification.ok ? "info" : "error",
+      message: verification.summary,
+    });
+  }
+
+  if (!verification.ok) {
+    throw new Error(
+      `Task failed after ${maxRepairAttempts} repair attempts: ` +
+        verification.summary,
+    );
+  }
       const diff = await git.diff();
 
       await emit({

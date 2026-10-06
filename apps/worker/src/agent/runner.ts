@@ -1,13 +1,10 @@
-import type {
 
-  AgentStep,
+import type {
   AgentProvider,
   AgentRunContext,
   AgentRunResult,
   AgentStepResult,
 } from "./types.js";
-
-const MAX_REPAIR_ATTEMPTS = 2;
 
 export class AgentRunner {
   constructor(
@@ -19,19 +16,6 @@ export class AgentRunner {
   ): Promise<AgentRunResult> {
     const steps = this.provider.plan(context);
     const results: AgentStepResult[] = [];
-
-    let implementationStep: AgentStep | undefined;
-    let validateStep: AgentStep | undefined;
-
-    for (const step of steps) {
-      if (step.name === "implement") {
-        implementationStep = step;
-      }
-
-      if (step.name === "validate") {
-        validateStep = step;
-      }
-    }
 
     for (const step of steps) {
       await context.emit({
@@ -61,27 +45,6 @@ export class AgentRunner {
           summary: result.summary,
           steps: results,
         };
-      }
-
-      if (
-        step.name === "validate" &&
-        implementationStep &&
-        validateStep
-      ) {
-        let repairAttempts = 0;
-
-        while (repairAttempts < MAX_REPAIR_ATTEMPTS) {
-          repairAttempts += 1;
-
-          await context.emit({
-            type: "log",
-            level: "info",
-            message:
-              `Validation passed. No repair needed.`,
-          });
-
-          break;
-        }
       }
     }
 

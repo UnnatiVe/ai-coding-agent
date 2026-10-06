@@ -102,11 +102,15 @@ export async function executeWorkspaceTool(
         const relativePath =
           call.arguments.relativePath;
 
-        const oldText =
-          call.arguments.oldText;
+       const oldText =
+  typeof call.arguments.oldText === "string"
+    ? call.arguments.oldText
+    : call.arguments.search;
 
-        const newText =
-          call.arguments.newText;
+const newText =
+  typeof call.arguments.newText === "string"
+    ? call.arguments.newText
+    : call.arguments.replace;
 
         if (typeof relativePath !== "string") {
           return {
