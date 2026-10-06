@@ -170,26 +170,7 @@ export function App() {
 
     const taskId = selectedTaskId;
 
-    void getJson<{
-      events: Array<{
-        seq: number;
-        payload: TaskEventEnvelope["event"];
-      }>;
-    }>(`/api/tasks/${taskId}/events?after=-1`)
-      .then((payload) => {
-        setTimeline(
-          payload.events.map((item) => ({
-            taskId,
-            seq: item.seq,
-            at: new Date().toISOString(),
-            event: item.payload,
-          })),
-        );
-      })
-      .catch(() => {
-        setTimeline([]);
-      });
-
+    setTimeline([]);
     connectToTaskStream(taskId);
 
     return () => {
