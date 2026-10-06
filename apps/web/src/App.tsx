@@ -602,6 +602,9 @@ export function App() {
             </div>
           </section>
         )}
+        <footer className="app-footer">
+  © 2026 Forge · Built by Unnati Verma · All rights reserved.
+</footer>
       </main>
     </div>
   );
