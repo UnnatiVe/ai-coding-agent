@@ -2,6 +2,10 @@ import { Router } from "express";
 import { prisma } from "@aca/db";
 import { pingRedis } from "../redis.js";
 
+import { Router } from "express";
+import { prisma } from "@aca/db";
+import { pingRedis } from "../redis.js";
+
 export const healthRouter: Router = Router();
 
 healthRouter.get("/health", (_req, res) => {
