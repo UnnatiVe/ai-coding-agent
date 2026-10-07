@@ -429,18 +429,14 @@ export class OllamaAgentProvider implements AgentProvider {
         ) {
           const targetPath = call.arguments.relativePath.replace(/\\/g, "/");
 
-          if (!explicitRequestedPaths.includes(targetPath)) {
-            result = {
-              ok: false,
-              error:
-                `The task explicitly says not to modify existing files. ` +
-                `You attempted to modify "${targetPath}", which is not the ` +
-                "requested new file. Read existing files if needed, but do " +
-                "not edit them. Use writeFile for the requested new file.",
-            };
-          } else {
-            result = await executeWorkspaceTool(context.tools, call);
-          }
+          result = {
+            ok: false,
+            error:
+              `The task explicitly says not to modify any existing files. ` +
+              `You attempted to modify "${targetPath}". ` +
+              "Read existing files if needed, but do not edit them. " +
+              "Create the requested new file with writeFile instead.",
+          };
         } else if (
           name === "runCommand" &&
           typeof call.arguments.command === "string" &&
@@ -545,12 +541,12 @@ export class OllamaAgentProvider implements AgentProvider {
 
         toolSummaries.push(`${name}: succeeded`);
         if (name === "writeFile" || name === "replaceInFile") {
-  return [
-    "Implementation file edit completed.",
-    "Workspace tool calls:",
-    ...toolSummaries,
-  ].join("\n");
-}
+          return [
+            "Implementation file edit completed.",
+            "Workspace tool calls:",
+            ...toolSummaries,
+          ].join("\n");
+        }
 
         messages.push({
           role: "tool",
