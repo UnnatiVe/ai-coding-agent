@@ -8,7 +8,7 @@ config({ path: fileURLToPath(new URL("../../../.env", import.meta.url)) });
 
 const schema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  API_PORT: z.coerce.number().int().positive().default(3001),
+  API_PORT: z.coerce.number().int().positive().default(Number(process.env.PORT) || 3001),
   CORS_ORIGIN: z.string().default("http://localhost:5173"),
   REDIS_URL: z.string().default("redis://localhost:6379"),
   DATABASE_URL: z.string().optional(),
