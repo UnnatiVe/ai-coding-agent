@@ -39,7 +39,7 @@ function extractRequestedEditPaths(prompt: string): string[] {
   const paths: string[] = [];
 
   const pattern =
-    /\b(?:create|add|write|generate)\s+(?:only\s+)?(?:`([^`]+)`|"([^"]+)"|'([^']+)'|([a-zA-Z0-9_.-]+(?:[\\/][a-zA-Z0-9_.-]+)*\.[a-zA-Z0-9]+))/gi;
+    /\b(?:create|add|write|generate)\s+(?:(?:a|an|the)\s+)?(?:(?:new|only)\s+)*(?:file\s+)?(?:at\s+)?(?:`([^`]+)`|"([^"]+)"|'([^']+)'|([a-zA-Z0-9_.-]+(?:[\\/][a-zA-Z0-9_.-]+)*\.[a-zA-Z0-9]+))/gi;
 
   for (const match of prompt.matchAll(pattern)) {
     const rawCandidate = match[1] ?? match[2] ?? match[3] ?? match[4];
@@ -529,6 +529,18 @@ if (requestedEditPaths.length > 0 && allowRepairEdits) {
               `File "${normalizedEditPath}" was already edited successfully. ` +
               "Do not repeat the same edit. Work on any other requested files.",
           };
+        } else if (
+          name === "replaceInFile" &&
+          !allowRepairEdits &&
+          requestedEditPaths.includes(normalizedEditPath) &&
+          /\bcreate\s+(?:(?:a|an|the)\s+)?new\s+file\b/i.test(context.prompt)
+        ) {
+          result = {
+            ok: false,
+            error:
+              `Cannot use replaceInFile for the new file "${normalizedEditPath}". ` +
+              "Use writeFile with the complete file content instead.",
+          };
         } else if (!pathGuardResult.allowed) {
           result = {
             ok: false,
@@ -556,11 +568,17 @@ if (requestedEditPaths.length > 0 && allowRepairEdits) {
               `Tool ${name} failed: ${errorMessage}`,
               "Do not repeat the same failed operation.",
               name === "replaceInFile"
-                ? errorMessage.includes("does not exist")
-                  ? "If the requested new file does not exist, create it with writeFile using complete content."
-                  : "Read the existing file and copy the exact unique text before retrying."
+                ? errorMessage.includes("Cannot use replaceInFile for the new file")
+            ? "This is a new file. Use writeFile with the complete file content instead."
+            : errorMessage.includes("oldText and newText are identical")
+                  ? "Your replacement makes no change. Do not repeat it. If the requested file is already complete, stop editing and report completion. Otherwise, provide genuinely different newText."
+                  : errorMessage.includes("does not exist")
+                    ? "If the requested new file does not exist, create it with writeFile using complete content."
+                    : "Read the existing file and copy the exact unique text before retrying."
                 : name === "readFile"
-                  ? "Check the path and inspect the repository before retrying."
+                  ? errorMessage.includes("ENOENT")
+                    ? "The file does not exist. If this is the new file requested by the task, create it with writeFile using complete content. Do not try to read it again."
+                    : "Check the path and inspect the repository before retrying."
                   : name === "writeFile"
                     ? "If the target already exists, use replaceInFile instead."
                     : "Correct the arguments or choose an appropriate tool.",

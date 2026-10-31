@@ -468,3 +468,227 @@ test("provider repairs validation failure and succeeds after validation passes",
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+test("provider recognizes a file path in a create a new file at prompt", async () => {
+  const calls: Array<{ name: string; relativePath?: string }> = [];
+  const requestedPath = "apps/api/src/routes/forge-live-test.ts";
+
+  await withFakeOllama(
+    "writeFile",
+    requestedPath,
+    async () => {
+      const provider = new OllamaAgentProvider({
+        baseUrl: "http://127.0.0.1:11434",
+      });
+
+      const result = await provider.executeStep(
+        createContext(
+          "Create a new file at `apps/api/src/routes/forge-live-test.ts`. Do not modify or create any other files.",
+          calls,
+        ),
+        {
+          index: 1,
+          name: "implement",
+          description: "Create the requested file",
+        },
+      );
+
+      assert.equal(result.ok, true, result.summary);
+      assert.deepEqual(calls, [
+        { name: "writeFile", relativePath: requestedPath },
+      ]);
+    },
+  );
+});
+
+test("provider blocks replaceInFile for a requested new file", async () => {
+  const requestedPath = "apps/api/src/routes/forge-live-test.ts";
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Array<{ messages: Array<{ role: string; content?: string }> }> = [];
+  const calls: Array<{ name: string; relativePath?: string }> = [];
+
+  const context = createContext(
+    `Create a new file at \`${requestedPath}\`. Do not modify other files.`,
+    calls,
+  );
+
+  context.tools.replaceInFile = async () => {
+    throw new Error(
+      "No-op replacement rejected: oldText and newText are identical. Provide a newText that actually implements the requested change.",
+    );
+  };
+
+  let requestCount = 0;
+
+  globalThis.fetch = (async (_input, init) => {
+    requestCount += 1;
+
+    const body = JSON.parse(String(init?.body)) as {
+      messages: Array<{ role: string; content?: string }>;
+    };
+
+    requestBodies.push(body);
+
+    const message =
+      requestCount === 1
+        ? {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                function: {
+                  name: "replaceInFile",
+                  arguments: {
+                    relativePath: requestedPath,
+                    oldText: "same content",
+                    newText: "same content",
+                  },
+                },
+              },
+            ],
+          }
+        : requestCount === 2
+          ? {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                {
+                  function: {
+                    name: "writeFile",
+                    arguments: {
+                      relativePath: requestedPath,
+                      content: "complete file content",
+                    },
+                  },
+                },
+              ],
+            }
+          : {
+              role: "assistant",
+              content: "The requested file is complete.",
+              tool_calls: [],
+            };
+
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ message }),
+    } as Response;
+  }) as typeof fetch;
+
+  try {
+    const provider = new OllamaAgentProvider({
+      baseUrl: "http://127.0.0.1:11434",
+    });
+
+    const result = await provider.executeStep(context, {
+      index: 1,
+      name: "implement",
+      description: "Create the requested file",
+    });
+
+    assert.equal(result.ok, true, result.summary);
+    assert.equal(requestCount, 2);
+
+    const secondRequestMessages = requestBodies[1].messages;
+    const feedback = secondRequestMessages
+      .filter((message) => message.role === "user")
+      .map((message) => message.content ?? "")
+      .join("\n");
+
+    assert.match(feedback, /Cannot use replaceInFile for the new file/);
+    assert.match(feedback, /Use writeFile with the complete file content instead/);
+      } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("provider creates a requested file after readFile returns ENOENT", async () => {
+  const requestedPath = "apps/api/src/routes/forge-live-test.ts";
+  const originalFetch = globalThis.fetch;
+  const requestBodies: Array<{ messages: Array<{ role: string; content?: string }> }> = [];
+  const calls: Array<{ name: string; relativePath?: string }> = [];
+
+  const context = createContext(
+    `Create a new file at \`${requestedPath}\`. Do not modify other files.`,
+    calls,
+  );
+
+  let requestCount = 0;
+
+  globalThis.fetch = (async (_input, init) => {
+    requestCount += 1;
+
+    const body = JSON.parse(String(init?.body)) as {
+      messages: Array<{ role: string; content?: string }>;
+    };
+    requestBodies.push(body);
+
+    const message =
+      requestCount === 1
+        ? {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                function: {
+                  name: "readFile",
+                  arguments: { relativePath: requestedPath },
+                },
+              },
+            ],
+          }
+        : {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                function: {
+                  name: "writeFile",
+                  arguments: {
+                    relativePath: requestedPath,
+                    content: "export const forgeLiveTestRouter = Router();",
+                  },
+                },
+              },
+            ],
+          };
+
+    return {
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({ message }),
+    } as Response;
+  }) as typeof fetch;
+
+  try {
+    const provider = new OllamaAgentProvider({
+      baseUrl: "http://127.0.0.1:11434",
+    });
+
+    const result = await provider.executeStep(context, {
+      index: 1,
+      name: "implement",
+      description: "Create the requested file",
+    });
+
+    assert.equal(result.ok, true, result.summary);
+    assert.equal(requestCount, 2);
+    assert.deepEqual(calls, [
+      { name: "writeFile", relativePath: requestedPath },
+    ]);
+
+    const feedback = requestBodies[1].messages
+      .filter((message) => message.role === "user")
+      .map((message) => message.content ?? "")
+      .join("\n");
+
+    assert.match(feedback, /The file does not exist/);
+    assert.match(feedback, /create it with writeFile/);
+    assert.match(feedback, /Do not try to read it again/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
