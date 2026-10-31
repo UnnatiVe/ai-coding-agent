@@ -1,14 +1,6 @@
-import type {
-  AgentProvider,
-  AgentRunContext,
-  AgentStep,
-  AgentStepResult,
-} from "../types.js";
-import {
-  executeWorkspaceTool,
-  type WorkspaceToolCall,
-} from "../../workspace/tool-executor.js";
-
+import type { AgentProvider, AgentRunContext, AgentStep, AgentStepResult } from "../types.js";
+import { executeWorkspaceTool, type WorkspaceToolCall } from "../../workspace/tool-executor.js";
+import { checkRequestedPath } from "./path-guard.js";
 const DEFAULT_OLLAMA_MODEL = "qwen2.5-coder:3b";
 
 export interface OllamaProviderConfig {
@@ -43,6 +35,33 @@ function selectValidationCommand(scripts: string[]): string | null {
   return null;
 }
 
+function extractRequestedEditPaths(prompt: string): string[] {
+  const paths: string[] = [];
+
+  const pattern =
+    /\b(?:create|add|write|generate)\s+(?:(?:a|an|the)\s+)?(?:(?:new|only)\s+)*(?:file\s+)?(?:at\s+)?(?:`([^`]+)`|"([^"]+)"|'([^']+)'|([a-zA-Z0-9_.-]+(?:[\\/][a-zA-Z0-9_.-]+)*\.[a-zA-Z0-9]+))/gi;
+
+  for (const match of prompt.matchAll(pattern)) {
+    const rawCandidate = match[1] ?? match[2] ?? match[3] ?? match[4];
+
+    if (!rawCandidate) {
+      continue;
+    }
+
+    const candidate = rawCandidate.trim().replace(/\\/g, "/");
+
+    if (
+      candidate.includes("/") &&
+      candidate.includes(".") &&
+      !paths.includes(candidate)
+    ) {
+      paths.push(candidate);
+    }
+  }
+
+  return paths;
+}
+
 export class OllamaAgentProvider implements AgentProvider {
   private readonly baseUrl: string;
   private readonly model: string;
@@ -52,11 +71,10 @@ export class OllamaAgentProvider implements AgentProvider {
     this.model = config.model ?? DEFAULT_OLLAMA_MODEL;
   }
 
-  async repair(
-    context: AgentRunContext,
-    feedback: string,
-  ): Promise<AgentStepResult> {
+  async repair(context: AgentRunContext, feedback: string): Promise<AgentStepResult> {
     try {
+      const diffBeforeRepair = await context.git.diff();
+
       const result = await this.runImplementStep(
         context,
         {
@@ -66,30 +84,24 @@ export class OllamaAgentProvider implements AgentProvider {
             "Repair the existing implementation based on verifier feedback.",
             "Inspect the actual current file before editing.",
             `Verifier feedback: ${feedback}`,
-            "",
-            "This is a minimal repair attempt.",
-            "The requested file already exists.",
-            "NEVER use writeFile during this repair.",
-            "Use readFile first, then use replaceInFile with exact text copied from readFile.",
-            "Fix only the specific problem reported by the verifier.",
-            "Do not remove code that already satisfies the task.",
-            "Do not rewrite working code unnecessarily.",
-            "Do not create unrelated functionality.",
-            "",
-            "The verifier accepts an Express router export only when the file contains either:",
-            "export default router;",
-            "or",
-            "export { router };",
-            "Follow the existing Express router typing pattern in this repository exactly.",
-            "In apps/api/src/routes/tasks.ts, the established pattern is: export const tasksRouter: Router = Router();",
-            "Do not use Router<...>(), Router<Request, Response>(), or invented generic type parameters.",
-            "If the TypeScript error mentions Router inference or TS2742, use the repository pattern above instead of adding generic type parameters.",
-            "For this task, keep the existing GET / endpoint and its requested JSON response.",
-            "After making the minimal repair, stop and let Forge run validation and verification.",
+            "Make only the minimal change needed to satisfy the verifier.",
+            "Use readFile and replaceInFile for the existing file.",
+            "Do not use writeFile during repair.",
+            "Do not add unrelated functionality.",
           ].join("\n"),
         },
         feedback,
       );
+
+      const diffAfterRepair = await context.git.diff();
+      if (diffAfterRepair === diffBeforeRepair) {
+        return {
+          stepIndex: 1,
+          name: "repair",
+          summary: "Repair did not produce any Git changes. " + `Agent output: ${result}`,
+          ok: false,
+        };
+      }
 
       return {
         stepIndex: 1,
@@ -98,10 +110,7 @@ export class OllamaAgentProvider implements AgentProvider {
         ok: true,
       };
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "local Ollama repair request failed";
+      const message = error instanceof Error ? error.message : "local Ollama repair request failed";
 
       return {
         stepIndex: 1,
@@ -111,8 +120,6 @@ export class OllamaAgentProvider implements AgentProvider {
       };
     }
   }
-
-
 
   plan(_context: AgentRunContext): AgentStep[] {
     return [
@@ -139,10 +146,7 @@ export class OllamaAgentProvider implements AgentProvider {
     ];
   }
 
-  async executeStep(
-    context: AgentRunContext,
-    step: AgentStep,
-  ): Promise<AgentStepResult> {
+  async executeStep(context: AgentRunContext, step: AgentStep): Promise<AgentStepResult> {
     try {
       const result = await this.runOllamaStep(context, step);
 
@@ -153,10 +157,7 @@ export class OllamaAgentProvider implements AgentProvider {
         ok: true,
       };
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "local Ollama request failed";
+      const message = error instanceof Error ? error.message : "local Ollama request failed";
 
       return {
         stepIndex: step.index,
@@ -167,10 +168,7 @@ export class OllamaAgentProvider implements AgentProvider {
     }
   }
 
-  private async runOllamaStep(
-    context: AgentRunContext,
-    step: AgentStep,
-  ): Promise<string> {
+  private async runOllamaStep(context: AgentRunContext, step: AgentStep): Promise<string> {
     if (step.name !== "implement") {
       return this.runTextStep(context, step);
     }
@@ -178,10 +176,7 @@ export class OllamaAgentProvider implements AgentProvider {
     return this.runImplementStep(context, step);
   }
 
-  private async runTextStep(
-    context: AgentRunContext,
-    step: AgentStep,
-  ): Promise<string> {
+  private async runTextStep(context: AgentRunContext, step: AgentStep): Promise<string> {
     const messages: OllamaMessage[] = [
       {
         role: "system",
@@ -223,7 +218,7 @@ export class OllamaAgentProvider implements AgentProvider {
     step: AgentStep,
     repairFeedback?: string,
   ): Promise<string> {
-    const MAX_TOOL_ROUNDS = 12;
+    const MAX_TOOL_ROUNDS = 8;
 
     const messages: OllamaMessage[] = [
       {
@@ -231,7 +226,10 @@ export class OllamaAgentProvider implements AgentProvider {
         content: [
           "You are Forge, a local autonomous coding agent working in a controlled repository.",
           "Inspect the actual repository before changing files. Never invent filenames, paths, APIs, or file contents.",
+          "Available workspace tools are ONLY listFiles, readFile, writeFile, and replaceInFile. Never call mkdir, createDirectory, runCommand, or any tool not explicitly available.",
           "Use listFiles to discover paths and readFile to inspect existing files.",
+          "When the task explicitly says to create a new file at a specified path, do not call readFile on that target path. Check the parent directory with listFiles at most once if needed, then call writeFile with the exact requested relative path and complete file content.",
+          "Never finish implementation after only listing or reading files. A file-creation task is not complete until writeFile succeeds for the requested file. After a successful edit, stop and let Forge run automatic validation. Never call mkdir.",
           "For an existing file, use replaceInFile with exact text copied from readFile.",
           "Use writeFile only to create a genuinely new file. Never overwrite an existing file.",
           "For TypeScript errors, do not invent generic type parameters, type annotations, imports, or APIs.",
@@ -279,11 +277,62 @@ export class OllamaAgentProvider implements AgentProvider {
 
     let successfulToolCalls = 0;
     let consecutiveFailedToolCalls = 0;
+const toolSummaries: string[] = [];
+const requestedEditPaths = extractRequestedEditPaths(context.prompt);
 
-    const toolSummaries: string[] = [];
 
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-      const response = await this.chat(messages, true);
+const successfulEditPaths = new Set<string>();
+let allowRepairEdits = false;
+for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+  const allRequestedFilesEdited =
+    requestedEditPaths.length > 0 &&
+    requestedEditPaths.every((path) => successfulEditPaths.has(path));
+
+
+ if (allRequestedFilesEdited && !allowRepairEdits) {
+
+    const scripts = await context.tools.getScripts();
+    const validationCommand = selectValidationCommand(scripts);
+
+    if (!validationCommand) {
+      return [
+        "All explicitly requested files were edited successfully.",
+        "No supported validation script was found.",
+        "Workspace tool calls:",
+        ...toolSummaries,
+      ].join("\n");
+    }
+
+    const validationResult = await executeWorkspaceTool(context.tools, {
+      name: "runCommand",
+      arguments: { command: validationCommand },
+    });
+
+    if (validationResult.ok) {
+      toolSummaries.push(
+        `Automatic validation passed: ${validationCommand}`,
+      );
+
+      return [
+        "Implementation and validation completed successfully.",
+        "Workspace tool calls:",
+        ...toolSummaries,
+      ].join("\n");
+    }
+  allowRepairEdits = true;
+
+    messages.push({
+      role: "user",
+      content: [
+        `Automatic validation failed: ${validationCommand}`,
+        validationResult.error ?? "Unknown validation error",
+        "Inspect the error and repair the actual problem.",
+        "Do not run validation yourself.",
+      ].join("\n"),
+    });
+  }
+
+  const response = await this.chat(messages, true);
 
       if (!response.message) {
         throw new Error("Ollama returned no message");
@@ -291,15 +340,6 @@ export class OllamaAgentProvider implements AgentProvider {
 
       const assistantMessage = response.message;
 
-      console.log(
-        `[implement round ${round + 1}] assistant content:`,
-        assistantMessage.content,
-      );
-
-      console.log(
-        `[implement round ${round + 1}] tool calls:`,
-        JSON.stringify(assistantMessage.tool_calls ?? []),
-      );
       let toolCalls = assistantMessage.tool_calls ?? [];
 
       if (toolCalls.length === 0 && assistantMessage.content?.trim()) {
@@ -328,12 +368,9 @@ export class OllamaAgentProvider implements AgentProvider {
                 parsedToolCalls.push({
                   function: {
                     name: parsed.name,
-                    arguments: normalizeToolArguments(
-                      parsed.arguments as Record<string, unknown>,
-                    ),
+                    arguments: normalizeToolArguments(parsed.arguments as Record<string, unknown>),
                   },
                 });
-
               }
             } catch {
               // Ignore malformed JSON fragments and continue parsing.
@@ -350,20 +387,78 @@ export class OllamaAgentProvider implements AgentProvider {
 
       if (toolCalls.length === 0) {
         const content = assistantMessage.content?.trim();
+if (successfulToolCalls === 0) {
+  throw new Error(
+    `Agent made no workspace tool calls. Response: ${content || "(empty response)"}`,
+  );
+}
 
-        if (successfulToolCalls === 0) {
-          throw new Error(
-            `Agent made no workspace tool calls. Response: ${content || "(empty response)"}`,
-          );
+const allRequestedFilesEdited =
+  requestedEditPaths.length > 0 &&
+  requestedEditPaths.every((path) => successfulEditPaths.has(path));
+
+if (requestedEditPaths.length > 0 && !allRequestedFilesEdited) {
+  throw new Error(
+    `Agent stopped before editing all requested files. Missing: ${
+      requestedEditPaths
+        .filter((path) => !successfulEditPaths.has(path))
+        .join(", ")
+    }`,
+  );
+}
+
+if (requestedEditPaths.length > 0 && allowRepairEdits) {
+  throw new Error(
+    "Automatic validation failed and the agent stopped without completing a repair.",
+  );
+}
+
+        const scripts = await context.tools.getScripts();
+        const validationCommand = selectValidationCommand(scripts);
+
+        if (!validationCommand) {
+          return [
+            content || "Implementation tool loop finished.",
+            "No supported validation script was found.",
+            "Workspace tool calls:",
+            ...toolSummaries,
+          ].join("\n");
         }
 
+        const validationResult = await executeWorkspaceTool(context.tools, {
+          name: "runCommand",
+          arguments: { command: validationCommand },
+        });
+        if (validationResult.ok) {
+          toolSummaries.push(
+            `Automatic validation passed: ${validationCommand}`,
+          );
+
+          return [
+            content || "Implementation and validation completed successfully.",
+            "Workspace tool calls:",
+            ...toolSummaries,
+          ].join("\n");
+        }
+        allowRepairEdits = true;
+        messages.push({
+          role: "assistant",
+          content: assistantMessage.content ?? "",
+        });
+
+        messages.push({
+          role: "user",
+          content: [
+            `Automatic validation failed: ${validationCommand}`,
+            validationResult.error ?? "Unknown validation error",
+            "Inspect the error and repair the actual problem.",
+            "Do not run validation yourself.",
+            "Do not claim the task is complete until validation passes.",
+          ].join("\n"),
+        });
 
 
-        return [
-          content || "Implementation tool loop finished.",
-          "Workspace tool calls:",
-          ...toolSummaries,
-        ].join("\n");
+        continue;
       }
 
       messages.push({
@@ -374,10 +469,7 @@ export class OllamaAgentProvider implements AgentProvider {
 
       for (const toolCall of toolCalls) {
         const name = toolCall.function.name;
-        console.log(
-          `[tool ${name}] arguments:`,
-          JSON.stringify(toolCall.function.arguments ?? {}),
-        );
+
         const allowedNames = [
           "listFiles",
           "readFile",
@@ -389,6 +481,7 @@ export class OllamaAgentProvider implements AgentProvider {
           consecutiveFailedToolCalls += 1;
 
           const errorMessage = `Unsupported workspace tool: ${name}`;
+
           messages.push({
             role: "user",
             content: `${errorMessage}. Use only the advertised workspace tools.`,
@@ -410,118 +503,84 @@ export class OllamaAgentProvider implements AgentProvider {
 
         let result: Awaited<ReturnType<typeof executeWorkspaceTool>>;
 
-        const explicitRequestedPaths = [
-          ...context.prompt.matchAll(
-            /(?:file|path)\s+(?:named\s+|at\s+)?[`'"]([^`'"]+)[`'"]/gi,
-          ),
-        ]
-          .map((match) => match[1])
-          .filter((value): value is string => Boolean(value))
-          .map((value) => value.replace(/\\/g, "/"));
+        const relativePath = call.arguments.relativePath;
+        const isFileEdit =
+          name === "writeFile" || name === "replaceInFile";
 
-        const taskDisallowsExistingFileChanges =
-          /do not modify any existing files/i.test(context.prompt);
+        const pathGuardResult =
+          isFileEdit && typeof relativePath === "string"
+            ? checkRequestedPath(context.prompt, relativePath)
+            : { allowed: true as const };
 
-        if (
-          taskDisallowsExistingFileChanges &&
-          name === "replaceInFile" &&
-          typeof call.arguments.relativePath === "string"
-        ) {
-          const targetPath = call.arguments.relativePath.replace(/\\/g, "/");
+        const normalizedEditPath =
+          typeof relativePath === "string"
+            ? relativePath.split("\\").join("/")
+            : "";
 
+       if (
+  isFileEdit &&
+  normalizedEditPath &&
+  successfulEditPaths.has(normalizedEditPath) &&
+  !allowRepairEdits
+) {
           result = {
             ok: false,
             error:
-              `The task explicitly says not to modify any existing files. ` +
-              `You attempted to modify "${targetPath}". ` +
-              "Read existing files if needed, but do not edit them. " +
-              "Create the requested new file with writeFile instead.",
+              `File "${normalizedEditPath}" was already edited successfully. ` +
+              "Do not repeat the same edit. Work on any other requested files.",
           };
         } else if (
-          name === "runCommand" &&
-          typeof call.arguments.command === "string" &&
-          /^(?:npm|pnpm|yarn)\s+(?:install|i)(?:\s|$)/i.test(
-            call.arguments.command.trim(),
-          )
+          name === "replaceInFile" &&
+          !allowRepairEdits &&
+          requestedEditPaths.includes(normalizedEditPath) &&
+          /\bcreate\s+(?:(?:a|an|the)\s+)?new\s+file\b/i.test(context.prompt)
         ) {
           result = {
             ok: false,
             error:
-              "Dependency installation is already handled by Forge. " +
-              "Do not run npm install, npm i, pnpm install, pnpm i, " +
-              "yarn install, or any other dependency installation command. " +
-              "Continue by inspecting and implementing the requested task.",
+              `Cannot use replaceInFile for the new file "${normalizedEditPath}". ` +
+              "Use writeFile with the complete file content instead.",
           };
-        } else if (name === "replaceInFile") {
-          const relativePath = call.arguments.relativePath;
-
-          if (typeof relativePath === "string") {
-            let fileExists = true;
-
-            try {
-              await context.tools.readFile(relativePath);
-            } catch {
-              fileExists = false;
-            }
-
-            if (!fileExists) {
-              const newText = call.arguments.newText;
-
-              if (typeof newText === "string") {
-                const writeResult = await executeWorkspaceTool(context.tools, {
-                  name: "writeFile",
-                  arguments: {
-                    relativePath,
-                    content: newText,
-                  },
-                });
-
-                result = writeResult.ok
-                  ? {
-                    ok: true,
-                    result:
-                      `Created new file "${relativePath}" using writeFile because ` +
-                      "the requested file did not exist. Do not call another file-editing " +
-                      "tool for this file.",
-                  }
-                  : writeResult;
-              } else {
-                result = {
-                  ok: false,
-                  error:
-                    `Cannot use replaceInFile because "${relativePath}" does not exist. ` +
-                    "Use writeFile to create it with the complete file content.",
-                };
-              }
-            } else {
-              result = await executeWorkspaceTool(context.tools, call);
-            }
-          } else {
-            result = await executeWorkspaceTool(context.tools, call);
-          }
+        } else if (!pathGuardResult.allowed) {
+          result = {
+            ok: false,
+            error:
+              pathGuardResult.error ??
+              "The task does not permit editing this file.",
+          };
         } else {
           result = await executeWorkspaceTool(context.tools, call);
         }
         if (!result.ok) {
           consecutiveFailedToolCalls += 1;
-          const errorMessage = result.error ?? "Unknown tool error";
+
+          const errorMessage =
+            result.error ?? "Unknown workspace tool error";
+
+          messages.push({
+            role: "tool",
+            content: JSON.stringify(result),
+          });
 
           messages.push({
             role: "user",
             content: [
               `Tool ${name} failed: ${errorMessage}`,
-              "Do not claim this operation succeeded.",
+              "Do not repeat the same failed operation.",
               name === "replaceInFile"
-                ? errorMessage.includes("does not exist")
-                  ? "The target file does not exist. Use writeFile to create it. Do not call replaceInFile again for this path."
-                  : "Read the existing file again and copy the exact unique text before retrying."
+                ? errorMessage.includes("Cannot use replaceInFile for the new file")
+            ? "This is a new file. Use writeFile with the complete file content instead."
+            : errorMessage.includes("oldText and newText are identical")
+                  ? "Your replacement makes no change. Do not repeat it. If the requested file is already complete, stop editing and report completion. Otherwise, provide genuinely different newText."
+                  : errorMessage.includes("does not exist")
+                    ? "If the requested new file does not exist, create it with writeFile using complete content."
+                    : "Read the existing file and copy the exact unique text before retrying."
                 : name === "readFile"
-                  ? errorMessage.includes("ENOENT") ||
-                    errorMessage.includes("no such file or directory")
-                    ? "The requested file does not exist yet. If this is the new file requested by the task, create it with writeFile using the complete file content. Do not call readFile again for the missing file."
-                    : "Check the path and inspect the repository before retrying readFile."
+                  ? errorMessage.includes("ENOENT")
+                    ? "The file does not exist. If this is the new file requested by the task, create it with writeFile using complete content. Do not try to read it again."
+                    : "Check the path and inspect the repository before retrying."
                   : name === "writeFile"
-                    ? "If the target exists, use replaceInFile instead."
+                    ? "If the target already exists, use replaceInFile instead."
                     : "Correct the arguments or choose an appropriate tool.",
             ].join("\n"),
           });
@@ -534,37 +593,39 @@ export class OllamaAgentProvider implements AgentProvider {
 
           continue;
         }
-        consecutiveFailedToolCalls = 0;
-        successfulToolCalls += 1;
+if (isFileEdit) {
+  consecutiveFailedToolCalls = 0;
+}
 
+successfulToolCalls += 1;
 
+       if (isFileEdit && normalizedEditPath) {
+  successfulEditPaths.add(normalizedEditPath);
+  allowRepairEdits = false;
 
+}
         toolSummaries.push(`${name}: succeeded`);
-        if (name === "writeFile" || name === "replaceInFile") {
-          return [
-            "Implementation file edit completed.",
-            "Workspace tool calls:",
-            ...toolSummaries,
-          ].join("\n");
-        }
 
         messages.push({
           role: "tool",
           content: JSON.stringify(result),
         });
-
-
       }
     }
 
     throw new Error(
-      `Agent reached the ${MAX_TOOL_ROUNDS}-round limit before finishing implementation.`,
+      [
+        `Agent reached the ${MAX_TOOL_ROUNDS}-round limit before finishing implementation.`,
+        "Successful workspace tool calls:",
+        ...(toolSummaries.length > 0 ? toolSummaries : ["No successful tool calls recorded."]),
+        `Successful tool call count: ${successfulToolCalls}`,
+        `Requested edit paths: ${requestedEditPaths.join(", ") || "none"}`,
+        `Successful edit paths: ${[...successfulEditPaths].join(", ") || "none"}`,
+      ].join("\n"),
     );
+
   }
-  private async chat(
-    messages: OllamaMessage[],
-    enableTools: boolean,
-  ): Promise<OllamaResponse> {
+  private async chat(messages: OllamaMessage[], enableTools: boolean): Promise<OllamaResponse> {
     const body: Record<string, unknown> = {
       model: this.model,
       stream: false,
@@ -584,7 +645,10 @@ export class OllamaAgentProvider implements AgentProvider {
             parameters: {
               type: "object",
               properties: {
-                relativePath: { type: "string", description: "Relative path; use '.' for the repository root." },
+                relativePath: {
+                  type: "string",
+                  description: "Relative path; use '.' for the repository root.",
+                },
               },
             },
           },
@@ -593,7 +657,8 @@ export class OllamaAgentProvider implements AgentProvider {
           type: "function",
           function: {
             name: "readFile",
-            description: "Read an existing UTF-8 file. Always do this before editing an existing file.",
+            description:
+              "Read an existing UTF-8 file. Always do this before editing an existing file.",
             parameters: {
               type: "object",
               properties: {
@@ -622,7 +687,8 @@ export class OllamaAgentProvider implements AgentProvider {
           type: "function",
           function: {
             name: "replaceInFile",
-            description: "Replace one exact, unique text block in an existing file. Copy oldText directly from readFile.",
+            description:
+              "Replace one exact, unique text block in an existing file. Copy oldText directly from readFile.",
             parameters: {
               type: "object",
               properties: {
@@ -634,7 +700,6 @@ export class OllamaAgentProvider implements AgentProvider {
             },
           },
         },
-
       ];
     }
 
@@ -650,8 +715,7 @@ export class OllamaAgentProvider implements AgentProvider {
       const text = await res.text();
 
       throw new Error(
-        `Ollama request failed: ${res.status} ${res.statusText}${text ? ` - ${text}` : ""
-        }`,
+        `Ollama request failed: ${res.status} ${res.statusText}${text ? ` - ${text}` : ""}`,
       );
     }
 
@@ -665,9 +729,7 @@ export class OllamaAgentProvider implements AgentProvider {
   }
 }
 
-function normalizeToolArguments(
-  value: Record<string, unknown>,
-): Record<string, unknown> {
+function normalizeToolArguments(value: Record<string, unknown>): Record<string, unknown> {
   const normalized: Record<string, unknown> = {};
 
   for (const [key, valueItem] of Object.entries(value)) {

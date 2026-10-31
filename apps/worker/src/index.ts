@@ -13,6 +13,7 @@ const publisher = createRedisConnection();
 const worker = new Worker(TASK_QUEUE, createProcessor(publisher), {
   connection,
   concurrency: env.WORKER_CONCURRENCY,
+  lockDuration: 120_000,
 });
 
 worker.on("ready", () => logger.info(`worker ready, listening on queue "${TASK_QUEUE}"`));
