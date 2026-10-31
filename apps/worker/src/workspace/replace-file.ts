@@ -44,9 +44,22 @@ export async function replaceInWorkspaceFile(
     "utf8",
   );
 
-  const occurrences =
-    content.split(oldText).length - 1;
+   const normalizeLineEndings = (text: string) =>
+    text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
+  const normalizedContent = normalizeLineEndings(content);
+  const normalizedOldText = normalizeLineEndings(oldText);
+  const normalizedNewText = normalizeLineEndings(newText);
+
+  const occurrences =
+    normalizedContent.split(normalizedOldText).length - 1;
+
+  if (normalizedOldText === normalizedNewText) {
+    throw new Error(
+      "No-op replacement rejected: oldText and newText are identical. " +
+        "Provide a newText that actually implements the requested change.",
+    );
+  }
   if (occurrences === 0) {
     throw new Error(
       [
@@ -65,9 +78,14 @@ export async function replaceInWorkspaceFile(
     );
   }
 
-  const updatedContent = content.replace(
-    oldText,
-    newText,
+    const usesCRLF = content.includes("\r\n");
+  const replacementText = usesCRLF
+    ? normalizedNewText.replace(/\n/g, "\r\n")
+    : normalizedNewText;
+
+  const updatedContent = normalizedContent.replace(
+    normalizedOldText,
+    replacementText,
   );
 
   await writeFile(
