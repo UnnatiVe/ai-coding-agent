@@ -1,161 +1,138 @@
-# AI Coding Agent
+# Forge — AI-Powered Coding Agent
 
-A learning project: an AI agent that takes a software-engineering task, reads a GitHub
-repository, edits code through controlled tools, runs tests in an isolated sandbox, and
-iterates until the task is done — streaming its progress to a web UI.
+Forge ek AI-powered coding agent hai jo natural-language software tasks ko code changes aur GitHub pull requests me badalta hai. Yeh ek web interface aur API ko ek asynchronous worker se jodta hai, jo local hosted LLM, controlled file-editing tools aur automated verification ka upyog karta hai.
 
-> **Status: Phase 2 — database + queue infrastructure.** Real Prisma schema and
-> migrations, BullMQ producer/consumer, durable task events. A submitted task travels
-> API → Postgres → Redis → worker and ends in `failed` on purpose: the LLM, the agent
-> loop, the tool registry and the Docker sandbox are not implemented yet.
+> **Project Status:** Working prototype. Frontend aur API deployed hain; agent worker local Ollama inference ka use karta hai aur tasks process karne ke liye ise developer ki machine par chalna zaroori hai.
 
-## Requirements
+## 🌐 Live Demo
 
-- Node.js >= 20
-- pnpm 9 (`corepack enable` or `npm i -g pnpm@9`)
-- Docker + Docker Compose (for Postgres and Redis)
+- **Frontend:** [https://vercel.app](https://vercel.app)
+- **API:** [https://onrender.com](https://onrender.com)
+- **Source Code:** [https://github.com](https://github.com)
 
-## Quick start
+## ✨ Key Features
 
-```bash
-cp .env.example .env
-pnpm install
-pnpm infra:up        # postgres + redis
-pnpm db:generate     # generate the Prisma client
-pnpm db:migrate      # apply migrations to the dev database
-pnpm dev             # api :3001, web :5173, worker (queue consumer)
+- **Natural Language Input:** Web interface ke jariye natural language me coding tasks submit karein.
+- **GitHub Integration:** GitHub repository ko connect karein aur tasks ko asynchronously process karein.
+- **Local LLM Inference:** Local aur zero-inference-cost model execution ke liye Ollama ke jariye **Qwen 2.5 Coder 3B** ka upyog karein.
+- **Controlled Agent Interface:** Agent ko char tools ka access milta hai:
+  - `listFiles` — Repository files ko inspect karne ke liye.
+  - `readFile` — File ke contents ko read karne ke liye.
+  - `writeFile` — Nayi files create karne ke liye.
+  - `replaceInFile` — Targeted edits (badlav) karne ke liye.
+- **Automated Verification:** Changes ko validate karne ke liye TypeScript type-checking jaise automated checks chalayein.
+- **Task Tracking:** Application ke jariye task progress aur results ko track karein.
+- **Automated PR Generation:** Kam poora hone par Git branch banayein aur GitHub pull request generate karein.
+
+## 🛠️ Tech Stack
+
+| Area | Technologies |
+|---|---|
+| **Frontend** | React, TypeScript, Vite |
+| **Backend** | Node.js, Express, REST APIs |
+| **Database** | PostgreSQL, Prisma, Neon |
+| **Queue** | Redis, BullMQ, Upstash |
+| **AI** | Ollama, Qwen 2.5 Coder 3B |
+| **GitHub Integration** | GitHub API, branches aur pull requests |
+| **Deployment** | Vercel (frontend), Render (API) |
+
+## 📐 Architecture
+
+```text
+Web UI (Vercel)
+     |
+     | REST API
+     v
+API (Render) --------> PostgreSQL (Neon)
+     |
+     | enqueue task
+     v
+Redis / BullMQ (Upstash)
+     |
+     | consume task
+     v
+Local Worker
+     |
+     +----> Ollama / Qwen 2.5 Coder 3B
+     |
+     +----> Repository tools and verification
+     |
+     +----> Git branch / commit / pull request
 ```
 
-Then open http://localhost:5173 — the page reports Postgres/Redis health and lists tasks.
+API incoming requests aur task persistence ko sambhalti hai. BullMQ background jobs ko manage karta hai, jabki worker repository operations aur AI-assisted code changes ko perform karta hai. Local worker inference ke liye Ollama ke sath communicate karta hai.
 
-### Database migrations
+## 🚀 Run Locally
 
-Prisma reads the root `.env` through `dotenv-cli`, so these work from anywhere in the repo:
+### Prerequisites
 
-| Command            | When                                                               |
-| ------------------ | ------------------------------------------------------------------ |
-| `pnpm db:generate` | After changing `schema.prisma`, to regenerate the typed client     |
-| `pnpm db:migrate`  | Dev: create and apply a migration                                  |
-| `pnpm db:deploy`   | CI/production: apply committed migrations, never generate new ones |
-| `pnpm db:reset`    | Drop the dev database and replay every migration from scratch      |
-| `pnpm db:studio`   | Browse the data in Prisma Studio                                   |
+- Node.js 20+
+- pnpm 9+
+- Docker Desktop (local PostgreSQL aur Redis ke liye, agar hosted services use nahi kar rahe hain)
+- Ollama
+- Application ke liye zaroori GitHub credentials/configuration
 
-Migrations live in `packages/db/prisma/migrations` and are committed.
+### Setup
 
-### Verifying the queue
+1. **Repository ko clone karein aur dependencies install karein:**
+   ```bash
+   git clone https://github.com.git
+   cd ai-coding-agent
+   pnpm install
+   ```
 
-```bash
-curl localhost:3001/api/health/ready       # {"status":"ready","redis":true,"postgres":true}
-curl -X POST localhost:3001/api/dev/ping   # smoke job; worker logs "ping job processed"
-pnpm queue:ping                            # same job, from the CLI
+2. **Environment Variables:**
+   Root me `.env.example` ka use karke ek `.env` file banayein aur zaroori database, Redis, GitHub aur application variables configure karein.
 
-curl -X POST localhost:3001/api/tasks -H 'content-type: application/json' \
-  -d '{"repoFullName":"owner/repo","prompt":"Add a health check endpoint"}'
-curl localhost:3001/api/tasks/<id>         # queued -> running -> failed (no agent yet)
-curl localhost:3001/api/tasks/<id>/events  # durable event log, ?after=<seq> to resume
+3. **AI Model pull karein:**
+   Worker dwara use kiye jaane wale model ko pull karein:
+   ```bash
+   ollama pull qwen2.5-coder:3b
+   ```
 
-pnpm lint && pnpm typecheck && pnpm build
+4. **Infrastructure start karein (Local Docker use karne par):**
+   ```bash
+   pnpm infra:up
+   ```
+
+5. **Database setup karein:**
+   Prisma client generate karein aur database migrations apply karein:
+   ```bash
+   pnpm db:generate
+   pnpm db:migrate
+   ```
+
+6. **Application start karein:**
+   ```bash
+   pnpm dev
+   ```
+   Ab local web application ko `http://localhost:5173` par open karein.
+
+> ⚠️ **Worker Availability:** Deployed frontend aur API local Ollama worker ko running nahi rakhte hain. AI tasks ko execute karne ke liye, worker ko host karne wali machine ka on hona, connected hona aur Ollama aur worker process ka chalna zaroori hai.
+
+## 💻 Useful Commands
+
+| Command | Purpose |
+|---|---|
+| `pnpm dev` | Web app, API, aur worker ko ek sath chalane ke liye |
+| `pnpm build` | Workspaces ko build karne ke liye |
+| `pnpm typecheck` | Workspaces ki type-check karne ke liye |
+| `pnpm lint` | ESLint chalane ke liye |
+| `pnpm infra:up` | Local PostgreSQL aur Redis ko start karne ke liye |
+| `pnpm infra:down` | Local infrastructure ko stop karne ke liye |
+| `pnpm db:generate` | Prisma client generate karne ke liye |
+| `pnpm db:migrate` | Development migrations apply karne ke liye |
+
+## 🔒 Security & Project Scope
+
+Forge ek learning aur portfolio project hai, yeh production-ready multi-user coding platform nahi hai. Pull requests ko merge karne se pehle generate kiye gaye changes ko dhyan se review karein, aur aisi repositories ka use na karein jisme sensitive credentials ya data ho. Apne secrets ko hamesha environment variables me rakhein; kabhi bhi asli `.env` file ko commit na karein.
+
+## ✍️ Author
+
+**Unnati Verma**  
+[GitHub](https://github.com)
 ```
 
-## Data model
-
-| Model        | Why it exists                                                                                                                                     |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `User`       | Owns tasks. Carries `githubId`/`login` so the Phase 5 OAuth session slots in without a schema change.                                             |
-| `Repository` | Cached repo metadata (owner, default branch, GitHub App `installationId`) so a task references a row, not a raw string.                           |
-| `Task`       | One user request and its lifecycle (`queued → running → succeeded/failed/cancelled`), plus the BullMQ `jobId` and the resulting branch/PR.        |
-| `TaskEvent`  | Append-only progress log with a per-task `seq`. Written **before** publishing to Redis, so a reconnecting browser can replay from `?after=<seq>`. |
-| `AgentRun`   | One attempt at a task. Separating it from `Task` makes retries, model choice and token/cost accounting natural.                                   |
-| `ToolCall`   | Audit trail of every tool the agent invokes (args, result, duration) — needed for debugging and for the Phase 11 security review.                 |
-
-## Queue
-
-One BullMQ queue, `agent-tasks`, backed by Redis:
-
-- The API is a **producer** only. `POST /api/tasks` writes the `Task` row first, then adds
-  a `task.run` job with the deterministic id `task-<taskId>`, so a double submit is a no-op.
-- The worker is the **consumer**. It routes by job name (`task.run`, `test.ping`), runs
-  `WORKER_CONCURRENCY` jobs in parallel and retries with exponential backoff.
-- Progress is written to `TaskEvent` and published to the Redis channel `task:<taskId>`;
-  Phase 3 turns that channel into the SSE stream.
-
-## Workspace layout
-
-```
-ai-coding-agent/
-├─ apps/
-│  ├─ web/       React + Vite frontend (task UI, run timeline, log stream)
-│  ├─ api/       Express REST API + SSE hub; enqueues runs, never runs them
-│  └─ worker/    BullMQ consumer; will host the agent loop and sandbox
-├─ packages/
-│  ├─ shared/    Zod schemas + types shared by all three apps (events, contracts)
-│  └─ db/        Prisma schema, migrations and the shared PrismaClient
-├─ docker-compose.yml   Postgres 16 + Redis 7
-├─ eslint.config.js     Flat ESLint config (TS + Prettier)
-└─ tsconfig.base.json   Strict TS options every package extends
-```
-
-### What each workspace is for
-
-| Workspace         | Purpose                                                                                                                                                                                                                                 |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/web`        | The only thing the user touches. Submits tasks, renders the run timeline, live logs and diffs. Talks to the API over REST and (from Phase 3) SSE. Vite proxies `/api` to the backend in dev.                                            |
-| `apps/api`        | Thin HTTP layer: validates requests, persists tasks, pushes jobs onto the queue, and relays task events to browsers over SSE. Deliberately holds **no** agent logic — an HTTP request must never block on a multi-minute run.           |
-| `apps/worker`     | Where the agent actually lives. A separate process (and later a separate container with Docker socket access) that consumes queue jobs, drives the LLM loop, executes tools inside the sandbox, and publishes progress events to Redis. |
-| `packages/shared` | One source of truth for cross-process contracts: the task-event union, request schemas, job payloads, queue and channel names. Zod gives runtime validation and static types from a single definition.                                  |
-| `packages/db`     | Prisma schema plus a singleton client, so API and worker read/write the same models without duplicating setup.                                                                                                                          |
-
-## Architecture (Phase 2 slice)
-
-```
-browser (web:5173)
-   │ REST /api/*        (Vite dev proxy)
-   ▼
-api (:3001) ──enqueue task.run──► Redis / BullMQ ──job──► worker
-   │                                 ▲                      │
-   └── SSE (Phase 3) ◄───────────────┴── task:<id> pub/sub ──┤
-   │                                                         │
-   └──► Postgres (User, Repository, Task, TaskEvent,  ◄──────┘
-        AgentRun, ToolCall)
-```
-
-The eventual full flow: the API validates the request, persists a `Task` and enqueues
-`task.run`. The worker picks the job up, marks the task `running` and opens an `AgentRun`;
-from Phase 7 it drives the LLM loop, where each step records a `ToolCall`, executes it in
-the sandbox and emits a `TaskEvent` that the API relays to the browser. The run finishes
-by setting the terminal status, branch and PR URL.
-
-## Scripts
-
-| Command                                         | Description                                          |
-| ----------------------------------------------- | ---------------------------------------------------- |
-| `pnpm dev`                                      | Runs web, api and worker in parallel with hot reload |
-| `pnpm build`                                    | Builds every workspace                               |
-| `pnpm typecheck`                                | Type-checks every workspace                          |
-| `pnpm lint`                                     | ESLint across the repo (zero warnings allowed)       |
-| `pnpm format`                                   | Prettier write                                       |
-| `pnpm infra:up` / `infra:down`                  | Start/stop Postgres and Redis                        |
-| `pnpm db:generate` / `db:migrate` / `db:deploy` | Prisma client and migrations                         |
-| `pnpm queue:ping`                               | Enqueue a smoke job for the worker                   |
-
-## Environment
-
-All apps read the single root `.env` (see `.env.example`). Only `VITE_*` variables are
-exposed to the browser. `.env` is git-ignored; never commit real credentials.
-
-## Roadmap
-
-| Phase | Content                                                               |
-| ----- | --------------------------------------------------------------------- |
-| 1     | Monorepo scaffold, TS/lint config, Postgres + Redis, health checks ✅ |
-| 2     | Data model + queue wiring: `POST /api/tasks` → job → worker ✅        |
-| 3     | Event streaming end to end (Redis pub/sub → SSE → live timeline)      |
-| 4     | Docker sandbox: per-run container, resource limits, filesystem jail   |
-| 5     | GitHub App: OAuth, installation tokens, clone, branch management      |
-| 6     | Tool registry (read-only tools) with zod-validated arguments          |
-| 7     | Agent loop v1 with step/token budgets                                 |
-| 8     | Mutation tools and diff review UI                                     |
-| 9     | Test execution and the error-recovery loop                            |
-| 10    | Commit, push, and pull-request creation behind human approval         |
-| 11    | Hardening: prompt-injection defences, secret redaction, audit log     |
-| 12    | Evaluation on a fixed task set, polish, docs                          |
+<FollowUp>
+Kya aap is README me koi specific **section add** karna chahte hain (jaise **License** ya **Contribution Guidelines**), ya fir iska **tone/language** badalna hai?
+</FollowUp>
