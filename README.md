@@ -1,8 +1,8 @@
 # Forge — AI-Powered Coding Agent
 
-Forge ek AI-powered coding agent hai jo natural-language software tasks ko code changes aur GitHub pull requests me badalta hai. Yeh ek web interface aur API ko ek asynchronous worker se jodta hai, jo local hosted LLM, controlled file-editing tools aur automated verification ka upyog karta hai.
+Forge is an AI-powered coding agent that turns natural-language software tasks into code changes and GitHub pull requests. It connects a web interface and API to an asynchronous worker that uses a locally hosted LLM, controlled file-editing tools, and automated verification.
 
-> **Project Status:** Working prototype. Frontend aur API deployed hain; agent worker local Ollama inference ka use karta hai aur tasks process karne ke liye ise developer ki machine par chalna zaroori hai.
+> **Project Status:** Working prototype. The frontend and API are deployed; the agent worker uses local Ollama inference and must be running on the developer's machine to process tasks.
 
 ## 🌐 Live Demo
 
@@ -12,17 +12,17 @@ Forge ek AI-powered coding agent hai jo natural-language software tasks ko code 
 
 ## ✨ Key Features
 
-- **Natural Language Input:** Web interface ke jariye natural language me coding tasks submit karein.
-- **GitHub Integration:** GitHub repository ko connect karein aur tasks ko asynchronously process karein.
-- **Local LLM Inference:** Local aur zero-inference-cost model execution ke liye Ollama ke jariye **Qwen 2.5 Coder 3B** ka upyog karein.
-- **Controlled Agent Interface:** Agent ko char tools ka access milta hai:
-  - `listFiles` — Repository files ko inspect karne ke liye.
-  - `readFile` — File ke contents ko read karne ke liye.
-  - `writeFile` — Nayi files create karne ke liye.
-  - `replaceInFile` — Targeted edits (badlav) karne ke liye.
-- **Automated Verification:** Changes ko validate karne ke liye TypeScript type-checking jaise automated checks chalayein.
-- **Task Tracking:** Application ke jariye task progress aur results ko track karein.
-- **Automated PR Generation:** Kam poora hone par Git branch banayein aur GitHub pull request generate karein.
+- **Natural Language Input:** Submit coding tasks in natural language through a web interface.
+- **GitHub Integration:** Connect a GitHub repository and process tasks asynchronously.
+- **Local LLM Inference:** Use **Qwen 2.5 Coder 3B** through **Ollama** for local, zero-inference-cost model execution.
+- **Controlled Agent Interface:** Give the agent access to a four-tool interface:
+  - `listFiles` — Inspect repository files.
+  - `readFile` — Read file contents.
+  - `writeFile` — Create new files.
+  - `replaceInFile` — Make targeted edits.
+- **Automated Verification:** Run automated checks such as TypeScript type-checking to validate changes.
+- **Task Tracking:** Track task progress and results through the application.
+- **Automated PR Generation:** Create a Git branch and generate a GitHub pull request for completed work.
 
 ## 🛠️ Tech Stack
 
@@ -33,7 +33,7 @@ Forge ek AI-powered coding agent hai jo natural-language software tasks ko code 
 | **Database** | PostgreSQL, Prisma, Neon |
 | **Queue** | Redis, BullMQ, Upstash |
 | **AI** | Ollama, Qwen 2.5 Coder 3B |
-| **GitHub Integration** | GitHub API, branches aur pull requests |
+| **GitHub Integration** | GitHub API, branches, and pull requests |
 | **Deployment** | Vercel (frontend), Render (API) |
 
 ## 📐 Architecture
@@ -60,7 +60,7 @@ Local Worker
      +----> Git branch / commit / pull request
 ```
 
-API incoming requests aur task persistence ko sambhalti hai. BullMQ background jobs ko manage karta hai, jabki worker repository operations aur AI-assisted code changes ko perform karta hai. Local worker inference ke liye Ollama ke sath communicate karta hai.
+The API handles incoming requests and task persistence. BullMQ manages background jobs, while the worker performs repository operations and AI-assisted code changes. The local worker communicates with Ollama for inference.
 
 ## 🚀 Run Locally
 
@@ -68,69 +68,69 @@ API incoming requests aur task persistence ko sambhalti hai. BullMQ background j
 
 - Node.js 20+
 - pnpm 9+
-- Docker Desktop (local PostgreSQL aur Redis ke liye, agar hosted services use nahi kar rahe hain)
+- Docker Desktop (for local PostgreSQL and Redis, if not using hosted services)
 - Ollama
-- Application ke liye zaroori GitHub credentials/configuration
+- GitHub credentials/configuration required by the application
 
 ### Setup
 
-1. **Repository ko clone karein aur dependencies install karein:**
+1. **Clone the repository and install dependencies:**
    ```bash
-   git clone https://github.com.git
+   git clone https://github.com
    cd ai-coding-agent
    pnpm install
    ```
 
 2. **Environment Variables:**
-   Root me `.env.example` ka use karke ek `.env` file banayein aur zaroori database, Redis, GitHub aur application variables configure karein.
+   Create a root `.env` file using `.env.example` and configure the required database, Redis, GitHub, and application variables.
 
-3. **AI Model pull karein:**
-   Worker dwara use kiye jaane wale model ko pull karein:
+3. **Pull the AI Model:**
+   Pull the model used by the worker:
    ```bash
    ollama pull qwen2.5-coder:3b
    ```
 
-4. **Infrastructure start karein (Local Docker use karne par):**
+4. **Start local infrastructure (if using Docker setup):**
    ```bash
    pnpm infra:up
    ```
 
-5. **Database setup karein:**
-   Prisma client generate karein aur database migrations apply karein:
+5. **Set up the Database:**
+   Generate the Prisma client and apply database migrations:
    ```bash
    pnpm db:generate
    pnpm db:migrate
    ```
 
-6. **Application start karein:**
+6. **Start the Application:**
    ```bash
    pnpm dev
    ```
-   Ab local web application ko `http://localhost:5173` par open karein.
+   Open the local web application at `http://localhost:5173`.
 
-> ⚠️ **Worker Availability:** Deployed frontend aur API local Ollama worker ko running nahi rakhte hain. AI tasks ko execute karne ke liye, worker ko host karne wali machine ka on hona, connected hona aur Ollama aur worker process ka chalna zaroori hai.
+> ⚠️ **Worker Availability:** The deployed frontend and API do not keep the local Ollama worker running. For AI tasks to execute, the machine hosting the worker must be turned on, connected, and actively running Ollama along with the worker process.
 
 ## 💻 Useful Commands
 
 | Command | Purpose |
 |---|---|
-| `pnpm dev` | Web app, API, aur worker ko ek sath chalane ke liye |
-| `pnpm build` | Workspaces ko build karne ke liye |
-| `pnpm typecheck` | Workspaces ki type-check karne ke liye |
-| `pnpm lint` | ESLint chalane ke liye |
-| `pnpm infra:up` | Local PostgreSQL aur Redis ko start karne ke liye |
-| `pnpm infra:down` | Local infrastructure ko stop karne ke liye |
-| `pnpm db:generate` | Prisma client generate karne ke liye |
-| `pnpm db:migrate` | Development migrations apply karne ke liye |
+| `pnpm dev` | Run the web app, API, and worker concurrently |
+| `pnpm build` | Build the workspaces |
+| `pnpm typecheck` | Type-check the workspaces |
+| `pnpm lint` | Run ESLint |
+| `pnpm infra:up` | Start local PostgreSQL and Redis infrastructure |
+| `pnpm infra:down` | Stop local infrastructure |
+| `pnpm db:generate` | Generate the Prisma client |
+| `pnpm db:migrate` | Apply development migrations |
 
 ## 🔒 Security & Project Scope
 
-Forge ek learning aur portfolio project hai, yeh production-ready multi-user coding platform nahi hai. Pull requests ko merge karne se pehle generate kiye gaye changes ko dhyan se review karein, aur aisi repositories ka use na karein jisme sensitive credentials ya data ho. Apne secrets ko hamesha environment variables me rakhein; kabhi bhi asli `.env` file ko commit na karein.
+Forge is a learning and portfolio project; it is not a production-ready, multi-user coding platform. Review all generated changes thoroughly before merging pull requests, and do not connect repositories containing sensitive data or active credentials. Always keep your secrets inside environment variables and never commit your real `.env` file.
 
 ## ✍️ Author
 
 **Unnati Verma**  
-[GitHub](https://github.com)
-```
+[GitHub](https://github.com/UnnatiVe)
+
 
 
