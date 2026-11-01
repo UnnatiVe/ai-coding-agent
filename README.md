@@ -6,9 +6,9 @@ Forge ek AI-powered coding agent hai jo natural-language software tasks ko code 
 
 ## 🌐 Live Demo
 
-- **Frontend:** [https://vercel.app](https://vercel.app)
-- **API:** [https://onrender.com](https://onrender.com)
-- **Source Code:** [https://github.com](https://github.com)
+- **Frontend:** [https://vercel.app](https://vercel.app)](https://ai-coding-agent-green.vercel.app)
+- **API:** [https://onrender.com](https://onrender.com](https://ai-coding-agent-msqz.onrender.com)
+- **Source Code:** [https://github.com](https://github.com](https://github.com/UnnatiVe/ai-coding-agent)
 
 ## ✨ Key Features
 
@@ -133,6 +133,4 @@ Forge ek learning aur portfolio project hai, yeh production-ready multi-user cod
 [GitHub](https://github.com)
 ```
 
-<FollowUp>
-Kya aap is README me koi specific **section add** karna chahte hain (jaise **License** ya **Contribution Guidelines**), ya fir iska **tone/language** badalna hai?
-</FollowUp>
+
