@@ -13,10 +13,16 @@ Forge is an AI-powered coding agent that turns natural-language software tasks i
 ## Screenshots
 
 ### Dashboard
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/4199e14c-6007-412b-bbe2-591c42499a5b" />
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/4199e14c-6007-412b-bbe2-591c42499a5b" width="800" alt="Forge Dashboard" />
+</p>
 
 ### Generated Pull Request
-<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/d74b5f91-b6a3-4c0c-9700-761fb8646e51" />
+
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/d74b5f91-b6a3-4c0c-9700-761fb8646e51" width="800" alt="Generated Pull Request" />
+</p>
 
 
 ## ✨ Key Features
