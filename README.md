@@ -6,9 +6,9 @@ Forge ek AI-powered coding agent hai jo natural-language software tasks ko code 
 
 ## 🌐 Live Demo
 
-- **Frontend:** [https://vercel.app](https://vercel.app)](https://ai-coding-agent-green.vercel.app)
-- **API:** [https://onrender.com](https://onrender.com](https://ai-coding-agent-msqz.onrender.com)
-- **Source Code:** [https://github.com](https://github.com](https://github.com/UnnatiVe/ai-coding-agent)
+- **Frontend:** [https://ai-coding-agent-green.vercel.app](https://ai-coding-agent-green.vercel.app)
+- **API:** [https://ai-coding-agent-msqz.onrender.com](https://ai-coding-agent-msqz.onrender.com)
+- **Source Code:** [https://github.com/UnnatiVe/ai-coding-agent](https://github.com/UnnatiVe/ai-coding-agent)
 
 ## ✨ Key Features
 
