@@ -9,6 +9,15 @@ Forge is an AI-powered coding agent that turns natural-language software tasks i
 - **Frontend:** [https://ai-coding-agent-green.vercel.app](https://ai-coding-agent-green.vercel.app)
 - **API:** [https://ai-coding-agent-msqz.onrender.com](https://ai-coding-agent-msqz.onrender.com)
 - **Source Code:** [https://github.com/UnnatiVe/ai-coding-agent](https://github.com/UnnatiVe/ai-coding-agent)
+  
+## Screenshots
+
+### Dashboard
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/4199e14c-6007-412b-bbe2-591c42499a5b" />
+
+### Generated Pull Request
+<img width="1920" height="1080" alt="image" src="https://github.com/user-attachments/assets/d74b5f91-b6a3-4c0c-9700-761fb8646e51" />
+
 
 ## ✨ Key Features
 
